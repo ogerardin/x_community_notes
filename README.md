@@ -7,6 +7,8 @@ quick search and retrieval of the notes.
 ## Requirements
 - internet connection
 - Docker with Docker Compose
+- JRE 21 or higher
+- Maven 3.9 or higher
 
 ## Loading Notes
 
