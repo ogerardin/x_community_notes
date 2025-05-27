@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Note Search</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        table {
+            border-collapse: separate;
+            border-spacing: 0;
+            width: 100%;
+            margin-top: 1em;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 0.5em;
+            text-align: left;
+            border-left: none;
+            border-top: none;
+        }
+        th:last-child, td:last-child {
+            border-right: none;
+        }
+        th {
+            background: #f4f4f4;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            /* Add box-shadow to create border effect that won't move */
+            box-shadow: 0 1px 0 #ccc;
+        }
+        .spinner-overlay {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .search-bar { margin-bottom: 1em; }
+        .error { color: #b00; margin-top: 1em; }
+        .no-results { color: #555; margin-top: 1em; }
+        .author-id {
+            font-weight: bold;
+            color: #fff;
+        }
+        .sentinel {
+            height: 20px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+<h1>Note Search</h1>
+
+<div x-data="{
+        loading: false,
+        search: '',
+        items: [],
+        error: '',
+        offset: 0,
+        hasMore: true,
+        async fetchItems(append = false) {
+            if (!append) {
+                this.items = [];
+                this.offset = 0;
+                this.hasMore = true;
+            }
+            if (!this.hasMore || this.loading) return;
+
+            this.loading = true;
+            this.error = '';
+            try {
+                const response = await fetch(`/api/note?limit=50&offset=${this.offset}&summary_ts=wfts.${encodeURIComponent(this.search)}&select=createdatmillis,noteid,tweetid,noteauthorparticipantid,summary&order=createdatmillis.desc`, {
+                    headers: {
+                        'Prefer': 'count=exact'
+                    }
+                });
+                if (!response.ok) throw new Error('Fetch failed with status ' + response.status);
+
+                this.range = response.headers.get('Content-Range');
+                const totalCount = response.headers.get('Content-Range')?.split('/')[1] || '0';
+                this.totalCount = parseInt(totalCount);
+                const data = await response.json();
+
+                if (append) {
+                    this.items = [...this.items, ...data];
+                } else {
+                    this.items = data;
+                }
+
+                this.hasMore = data.length === 50;
+                this.offset += data.length;
+            } catch (e) {
+                this.error = 'Failed to load notes: ' + e.message;
+            } finally {
+                this.loading = false;
+            }
+        },
+        setupInfiniteScroll() {
+            const observer = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        this.fetchItems(true);
+                    }
+                });
+            }, { rootMargin: '100px' });
+
+            this.$watch('items', () => {
+                if (this.hasMore) {
+                    const sentinel = this.$el.querySelector('.sentinel');
+                    if (sentinel) {
+                        observer.observe(sentinel);
+                    }
+                }
+            });
+        },
+        init() {
+            this.setupInfiniteScroll();
+        },
+        formatSummary(summary) {
+            if (!summary) return '';
+            // Replace URLs with anchor tags
+            let html = summary.replace(
+                /(https?:\/\/[^\s]+)/g,
+                url => `<a href=&quot;${url}&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;>${url}</a>`
+            );
+            // Replace two consecutive spaces with <br>
+            html = html.replace(/  /g, '<br>');
+            return html;
+        },
+        async countNotes() {
+            let resp = await fetch('/api/note?select=summary.count()')
+            let data = await resp.json();
+            return data[0]?.count ?? 0;
+        },
+        async latest() {
+            let resp = await fetch('/api/note?select=createdatmillis.max()')
+            let data = await resp.json();
+            let millis = data[0]?.max ?? 0;
+            return new Date(millis).toLocaleString()
+        },
+        hashColor(str) {
+            // Simple hash to HSL color
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            // Use hash to get hue, keep saturation and lightness fixed for contrast
+            let hue = Math.abs(hash) % 360;
+            return `hsl(${hue}, 60%, 45%)`;
+        },
+
+    }">
+
+    <!-- Loading overlay -->
+    <template x-if="loading">
+        <div class="spinner-overlay">
+            <img src="https://i.gifer.com/ZZ5H.gif" alt="Loading..." width="48" height="48">
+        </div>
+    </template>
+
+    <div>
+        <p x-text="await countNotes() + ' notes, latest : ' + await latest()"> </p>
+    </div>
+
+
+    <div class="search-bar">
+        <input
+            x-model="search"
+            placeholder="Search..."
+            @keyup.enter="fetchItems()"
+            style="width: 300px;"
+            x-init="$el.focus()">
+        <button @click="fetchItems()">Search</button>
+    </div>
+
+    <div class="error" x-show="error" x-text="error"></div>
+    <div class="no-results" x-show="!loading && items.length === 0 && !error">
+        No results found.
+    </div>
+    <div x-show="!loading && !error && items.length > 0" x-text="`Query returned ${totalCount} items`"></div>
+
+    <table x-show="items.length > 0">
+        <thead>
+        <tr>
+            <th>Created At</th>
+            <th>...</th>
+            <th>Author ID</th>
+            <th>Summary</th>
+        </tr>
+        </thead>
+        <tbody>
+        <template x-for="item in items" :key="item.noteid">
+            <tr>
+                <td x-text="new Date(item.createdatmillis).toLocaleString()"></td>
+                <td>
+                    <a :href="'https://x.com/i/communitynotes/t/' + item.tweetid" target="_blank" rel="noopener" title="View notes on tweet">
+                        <!-- Eye icon SVG -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" style="vertical-align:middle" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                    </a>
+                </td>
+                <td
+                    class="author-id"
+                    :style="`background: ${hashColor(item.noteauthorparticipantid)}`"
+                    x-text="item.noteauthorparticipantid ? item.noteauthorparticipantid.slice(-4) : ''"
+                ></td>
+                <td x-html="formatSummary(item.summary)"></td>
+            </tr>
+        </template>
+        </tbody>
+    </table>
+    <div class="sentinel"></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<configuration>
+    <!--
+      https://thorben-janssen.com/hibernate-logging-guide
+      https://logback.qos.ch/manual/configuration.html
+    -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <Pattern>
+                %-5level %logger{36} - %msg%n
+            </Pattern>
+        </encoder>
+    </appender>
+    <appender name="HIBERNATELOG" class="ch.qos.logback.core.FileAppender">
+        <file>logs/hibernate.log</file>
+        <encoder>
+            <Pattern>
+                %d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n
+            </Pattern>
+        </encoder>
+    </appender>
+<!--
+    <logger name="org.hibernate.SQL" level="debug" additivity="false">
+        <appender-ref ref="HIBERNATELOG"/>
+    </logger>
+    <logger name="org.hibernate.orm.jdbc.bind" level="trace" additivity="false">
+        <appender-ref ref="HIBERNATELOG"/>
+    </logger>
+    <logger name="org.hibernate.stat" level="debug" additivity="false">
+        <appender-ref ref="HIBERNATELOG"/>
+    </logger>
+    <logger name="org.hibernate.SQL_SLOW" level="info" additivity="false">
+        <appender-ref ref="HIBERNATELOG"/>
+    </logger>
+    <logger name="org.hibernate.cache" level="debug" additivity="false">
+        <appender-ref ref="HIBERNATELOG"/>
+    </logger>
+-->
+
+    <logger name="org.hibernate" level="info" additivity="false">
+        <appender-ref ref="HIBERNATELOG"/>
+    </logger>
+
+    <logger name="org.jboss.logging" level="denug" additivity="false">
+        <appender-ref ref="HIBERNATELOG"/>
+    </logger>
+
+    <root level="debug">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
