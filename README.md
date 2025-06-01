@@ -7,8 +7,7 @@ quick search and retrieval of the notes.
 ## Requirements
 - internet connection
 - Docker with Docker Compose
-- JRE 21 or higher
-- Maven 3.9 or higher
+- bash shell with curl, jq, unzip installed
 
 ## Loading Notes
 
@@ -37,7 +36,7 @@ Optionally you may also start the following services:
 To load the notes into the database, run the loader script:
 
 ```bash
-  mvn run spring-boot:run
+  ./grab_notes.sh
 ```
 
 ## Accessing the notes

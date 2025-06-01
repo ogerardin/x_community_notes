@@ -9,6 +9,8 @@ services:
       POSTGRES_PASSWORD: example
     volumes:
       - pg_data:/var/lib/postgresql/data
+      - ./sql/notes_ddl.sql:/docker-entrypoint-initdb.d/notes_ddl.sql
+      - ./data:/data
     ports:
       - "5432:5432"
 
