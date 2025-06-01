@@ -177,6 +177,7 @@
             style="width: 300px;"
             x-init="$el.focus()">
         <button @click="fetchItems()">Search</button>
+        <button @click="search = ''">Clear</button>
     </div>
 
     <div class="error" x-show="error" x-text="error"></div>
@@ -221,3 +222,4 @@
 </div>
 </body>
 </html>
+
