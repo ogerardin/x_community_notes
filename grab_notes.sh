@@ -2,7 +2,7 @@
 
 set -e
 
-WORKDIR="data"
+DATADIR="data"
 FORCE_DOWNLOAD=0
 
 # Portable date functions that work on any Linux system
@@ -17,14 +17,10 @@ format_date() {
 }
 
 get_yesterday() {
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        date -v-1d "+%Y-%m-%d"
-    else
-        date -d "yesterday" "+%Y-%m-%d"
-    fi
+    date -v-1d "+%Y-%m-%d" 2>/dev/null || date -u -I -d "@$(( $(date +%s) - 86400 ))"
 }
 
-mkdir -p "$WORKDIR"
+mkdir -p "$DATADIR"
 
 download_notes_file() {
     local date="$1"
@@ -33,7 +29,7 @@ download_notes_file() {
     filename="$(format_date "$date" "+%Y-%m-%d-notes-00000.zip")"
     local url
     url="$(format_date "$date" "+https://ton.twimg.com/birdwatch-public-data/%Y/%m/%d/notes/notes-00000.zip")"
-    local file="$WORKDIR/$filename"
+    local file="$DATADIR/$filename"
 
     if [[ $FORCE_DOWNLOAD -eq 0 && -f "$file" ]]; then
         echo "  file already exists: $file" >&2
@@ -53,12 +49,15 @@ unzip_notes_file() {
     echo "$tsvfile"
 }
 
+# Get the path of a file inside a Docker container based on the local file path
 get_container_path() {
     local file="$1"
     local container="$2"
+
     local filepath="$(realpath "$file")"
     local mounted_file=""
 
+    # iterate over the mounts of the container to find the matching source path
     while read -r source target; do
         if [[ "$filepath" = "$source"* ]]; then
             relpath="${filepath#$source}"
@@ -72,19 +71,36 @@ get_container_path() {
     return 1
 }
 
+# Load the TSV file into the local PostgreSQL database
 load_tsv_to_db() {
     local tsvfile="$1"
+
+    echo "Loading $tsvfile into local PostgreSQL..." >&2
+
+    # clear the table and copy the data
+    echo "  truncating existing note table..." >&2
+    psql -U postgres -c "truncate note;"
+    echo "  copying data from $tsvfile..." >&2
+    psql -U postgres -c "\copy note FROM '$tsvfile' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)"
+}
+
+# Load the TSV file into the PostgreSQL database running in a Docker container
+load_tsv_to_db_docker() {
+    local tsvfile="$1"
+    local container="$2"
+
     echo "Loading $tsvfile into PostgreSQL..." >&2
 
     # Find the mount point in the container that matches the local file path
     local mounted_file
-    mounted_file=$(get_container_path "$tsvfile" "community_notes-db-1") || return 1
+    mounted_file=$(get_container_path "$tsvfile" "$container") || return 1
     echo "  mapped $tsvfile to $mounted_file in the container." >&2
 
+    # clear the table and copy the data
     echo "  truncating existing note table..." >&2
-    docker exec -it community_notes-db-1 psql -U postgres -c "truncate note;"
+    docker exec -it "$container" psql -U postgres -c "truncate note;"
     echo "  copying data from $mounted_file..." >&2
-    docker exec -it community_notes-db-1 \
+    docker exec -it "$container" \
       psql -U postgres -c "\copy note FROM '$mounted_file' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)"
 }
 
@@ -108,7 +124,13 @@ main() {
     tsvfile=$(unzip_notes_file "$zipfile")
 
     # Step 2: Load the TSV file into the PostgreSQL database
-    load_tsv_to_db "$tsvfile"
+    if pg_isready; then
+        echo "PostgreSQL is running locally" >&2
+        load_tsv_to_db "$tsvfile"
+    else
+        echo "PostgreSQL is not running locally - trying docker container" >&2
+        load_tsv_to_db_docker "$tsvfile" "community_notes-db-1"
+    fi
 }
 
 main "$@"

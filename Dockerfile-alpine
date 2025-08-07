@@ -1,0 +1,70 @@
+FROM postgres:17-alpine
+
+ENV POSTGRES_PASSWORD=example
+ENV POSTGREST_VERSION=13.0.4
+ENV HOMEDIR=/home
+
+RUN apk add --no-cache curl nginx unzip
+
+WORKDIR ${HOMEDIR}
+
+# Copy SQL files to initialize the database
+# Postgres will automatically run these scripts on startup if the database is empty
+COPY sql/*.sql /docker-entrypoint-initdb.d/
+
+# Install PostgREST
+ADD https://github.com/PostgREST/postgrest/releases/download/v${POSTGREST_VERSION}/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz .
+RUN tar -xf postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz \
+    && mv postgrest /usr/local/bin/ \
+    && rm postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz \
+    && chmod +x /usr/local/bin/postgrest
+
+# Generate the PostgREST configuration file
+COPY <<EOF postgrest.conf
+db-uri = "postgres://postgres:$POSTGRES_PASSWORD@localhost:5432/postgres"
+db-anon-role = "postgres"
+db-schemas = "public, pg_catalog"
+db-aggregates-enabled = true
+EOF
+
+# Copy the static files for the web interface
+COPY www/* ./www/
+
+# Generate the Nginx configuration file
+COPY <<EOF nginx.conf
+events {}
+http {
+    server {
+        listen 8080;
+        location / {
+            root $HOMEDIR/www;
+            autoindex on;
+        }
+        location /api/ {
+            proxy_pass http://localhost:3000/;
+        }
+    }
+}
+EOF
+
+
+# Copy the script to grab notes
+COPY grab_notes.sh .
+
+# The grab_notes.sh script will store downloaded notes in this directory; mount it to persist data
+VOLUME ["$HOMEDIR/data"]
+
+
+# Create a script to serve as entrypoint to start all services
+COPY <<EOF run.sh
+/usr/local/bin/docker-entrypoint.sh postgres &
+/usr/local/bin/postgrest ${HOMEDIR}/postgrest.conf &
+nginx -c ${HOMEDIR}/nginx.conf -g "daemon off;"
+EOF
+
+ENTRYPOINT ["/bin/sh", "run.sh"]
+
+EXPOSE 8080
+# Postgres port; uncomment to access the database directly
+#EXPOSE 5432
+
