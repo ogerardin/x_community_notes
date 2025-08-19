@@ -23,7 +23,6 @@ RUN tar -xf postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz \
 COPY <<EOF postgrest.conf
 db-uri = "postgres://postgres:$POSTGRES_PASSWORD@localhost:5432/postgres"
 db-anon-role = "postgres"
-db-schemas = "public, pg_catalog"
 db-aggregates-enabled = true
 EOF
 
@@ -35,7 +34,7 @@ COPY <<EOF nginx.conf
 events {}
 http {
     server {
-        listen 8080;
+        listen 80;
         location / {
             root $HOMEDIR/www;
             autoindex on;
@@ -64,7 +63,7 @@ EOF
 
 ENTRYPOINT ["/bin/sh", "run.sh"]
 
-EXPOSE 8080
-# Postgres port; uncomment to access the database directly
-#EXPOSE 5432
+EXPOSE 80
+# Postgres port if you need to connect directly
+EXPOSE 5432
 

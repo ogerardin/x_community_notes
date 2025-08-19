@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS note (
+CREATE TABLE note (
     noteid bigint NOT NULL,
     noteauthorparticipantid character varying(255),
     createdatmillis bigint,

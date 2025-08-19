@@ -1,0 +1,1 @@
+CREATE VIEW pg_stat_progress_copy AS SELECT * FROM pg_catalog.pg_stat_progress_copy;
