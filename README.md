@@ -118,3 +118,8 @@ The monitoring should be integrated into the web interface in the future.
 Open the following URL: http://localhost:8080
 
 
+### TODO
+- schedule the loader to run periodically
+- display the progress of the loader in the web interface
+
+

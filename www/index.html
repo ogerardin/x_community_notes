@@ -52,6 +52,31 @@
             height: 20px;
             margin-bottom: 20px;
         }
+        .summary-cell {
+            position: relative;
+        }
+        .copy-btn, .link-btn {
+            position: absolute;
+            top: 4px;
+            background: #f4f4f4;
+            border: none;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 1em;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+        .copy-btn:hover, .link-btn:hover {
+            opacity: 1;
+            background: #e0e0e0;
+        }
+        .copy-btn {
+            right: 4px;
+        }
+        .link-btn {
+            right: 38px;
+        }
     </style>
 </head>
 <body>
@@ -190,30 +215,46 @@
         <thead>
         <tr>
             <th>Created At</th>
-            <th>...</th>
             <th>Author ID</th>
-            <th>Summary</th>
+            <th>Note Text</th>
         </tr>
         </thead>
         <tbody>
         <template x-for="item in items" :key="item.noteid">
             <tr>
                 <td x-text="new Date(item.createdatmillis).toLocaleString()"></td>
-                <td>
-                    <a :href="'https://x.com/i/communitynotes/t/' + item.tweetid" target="_blank" rel="noopener" title="View notes on tweet">
-                        <!-- Eye icon SVG -->
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" style="vertical-align:middle" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                    </a>
-                </td>
                 <td
                     class="author-id"
                     :style="`background: ${hashColor(item.noteauthorparticipantid)}`"
                     x-text="item.noteauthorparticipantid ? item.noteauthorparticipantid.slice(-4) : ''"
                 ></td>
-                <td x-html="formatSummary(item.summary)"></td>
+                <td class="summary-cell">
+                    <button
+                        class="link-btn"
+                        @click="window.open('https://x.com/i/communitynotes/t/' + item.tweetid, '_blank', 'noopener')"
+                        title="View notes on tweet"
+                    >
+                        🔗
+                    </button>
+                    <button
+                        class="copy-btn"
+                        @click="
+                            navigator.clipboard.writeText(item.summary || '');
+                            item._copied = true;
+                            setTimeout(() => item._copied = false, 1500);
+                        "
+                        title="Copy note text to clipboard"
+                    >
+                        📋
+                    </button>
+                    <span
+                        x-show="item._copied"
+                        style="position: absolute; right: 50px; top: 4px; background: #222; color: #fff; padding: 4px 10px; border-radius: 6px; z-index: 10; font-size: 0.95em; box-shadow: 0 2px 8px rgba(0,0,0,0.15); white-space: nowrap;"
+                        x-transition.opacity
+                        x-text="'Copied!'"
+                    ></span>
+                    <div x-html="formatSummary(item.summary)"></div>
+                </td>
             </tr>
         </template>
         </tbody>
@@ -222,4 +263,3 @@
 </div>
 </body>
 </html>
-
