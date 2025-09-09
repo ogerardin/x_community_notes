@@ -49,6 +49,7 @@ EOF
 
 # Copy the script to grab notes
 COPY grab_notes.sh .
+RUN ln -s ${HOMEDIR}/grab_notes.sh /etc/periodic/daily/grab_notes.sh
 
 # The grab_notes.sh script will store downloaded notes in this directory; mount it to persist data
 VOLUME ["$HOMEDIR/data"]
