@@ -16,11 +16,16 @@ format_date() {
     fi
 }
 
-get_yesterday() {
-    date -v-1d "+%Y-%m-%d" 2>/dev/null || date -u -I -d "@$(( $(date +%s) - 86400 ))"
+# Return YYYY-MM-DD for N days ago (0 = today). Works on macOS and Linux.
+get_date_days_ago() {
+    local n="$1"
+    if [[ -z "$n" ]]; then n=0; fi
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        date -v-"${n}"d "+%Y-%m-%d"
+    else
+        date -u -I -d "@$(( $(date +%s) - n*86400 ))"
+    fi
 }
-
-mkdir -p "$DATADIR"
 
 download_notes_file() {
     local date="$1"
@@ -54,7 +59,8 @@ get_container_path() {
     local file="$1"
     local container="$2"
 
-    local filepath="$(realpath "$file")"
+    local filepath
+    filepath="$(realpath "$file")"
     local mounted_file=""
 
     # iterate over the mounts of the container to find the matching source path
@@ -94,7 +100,7 @@ load_tsv_to_db_docker() {
     # Find the mount point in the container that matches the local file path
     local mounted_file
     mounted_file=$(get_container_path "$tsvfile" "$container") || return 1
-    echo "  mapped $tsvfile to $mounted_file in the container." >&2
+    echo "  mapped $tsvfile to $mounted_file in container $container." >&2
 
     # clear the table and copy the data
     echo "  truncating existing note table..." >&2
@@ -105,22 +111,34 @@ load_tsv_to_db_docker() {
 }
 
 get_latest_notes_file() {
-    local today yesterday zipfile
-    today=$(date "+%Y-%m-%d")
-    yesterday=$(get_yesterday)
+    # Accept optional first argument: number of days to look back (default 7)
+    local lookback_days="${1:-7}"
 
-    zipfile=$(download_notes_file "$today")     && { echo "$zipfile"; return 0; }
-    zipfile=$(download_notes_file "$yesterday") && { echo "$zipfile"; return 0; }
+    # Validate lookback_days is a positive integer
+    if ! [[ "$lookback_days" =~ ^[0-9]+$ ]] || [ "$lookback_days" -lt 1 ]; then
+        echo "Invalid lookback days: $lookback_days" >&2
+        return 1
+    fi
 
-    echo "Failed to download notes file for $today and $yesterday." >&2
+    local i date zipfile
+    for (( i=0; i<lookback_days; i++ )); do
+        date=$(get_date_days_ago "$i")
+        zipfile=$(download_notes_file "$date") && { echo "$zipfile"; return 0; }
+    done
+
+    echo "Failed to download notes file for last $lookback_days days." >&2
     return 1
 }
 
 main() {
     local zipfile tsvfile
 
+    # Ensure the data directory exists so downloads succeed
+    mkdir -p "$DATADIR"
+
     # Step 1: Download and extract the latest notes file
-    zipfile=$(get_latest_notes_file)
+    # Optionally accept a first arg for lookback days and pass it to get_latest_notes_file
+    zipfile=$(get_latest_notes_file "$1")
     tsvfile=$(unzip_notes_file "$zipfile")
 
     # Step 2: Load the TSV file into the PostgreSQL database
