@@ -1,14 +1,14 @@
 FROM postgres:17-alpine
 
 ENV POSTGRES_PASSWORD=example
-ENV POSTGREST_VERSION=13.0.4
+ENV POSTGREST_VERSION=14.3
 ENV HOMEDIR=/home
 
 RUN apk add --no-cache curl nginx unzip
 
 WORKDIR ${HOMEDIR}
 
-# Copy SQL files to initialize the database
+# Add SQL files to initialize the database
 # Postgres will automatically run these scripts on startup if the database is empty
 COPY sql/*.sql /docker-entrypoint-initdb.d/
 
@@ -26,7 +26,7 @@ db-anon-role = "postgres"
 db-aggregates-enabled = true
 EOF
 
-# Copy the static files for the web interface
+# Add the static files for the web interface
 COPY www/* ./www/
 
 # Generate the Nginx configuration file
@@ -47,16 +47,20 @@ http {
 EOF
 
 
-# Copy the script to grab notes
+# Add the script to grab notes
 COPY grab_notes.sh .
+
+# Link it to the daily cron jobs
 RUN ln -s ${HOMEDIR}/grab_notes.sh /etc/periodic/daily/grab_notes.sh
 
-# The grab_notes.sh script will store downloaded notes in this directory; mount it to persist data
+# The grab_notes.sh script will store downloaded notes in the following volume; mount it to persist data
 VOLUME ["$HOMEDIR/data"]
 
 
 # Create a script to serve as entrypoint to start all services
+# The script starts cron, Postgres, PostgREST, and Nginx
 COPY <<EOF run.sh
+/usr/sbin/crond -L /var/log/crond.log &
 /usr/local/bin/docker-entrypoint.sh postgres &
 /usr/local/bin/postgrest ${HOMEDIR}/postgrest.conf &
 nginx -c ${HOMEDIR}/nginx.conf -g "daemon off;"
@@ -64,7 +68,8 @@ EOF
 
 ENTRYPOINT ["/bin/sh", "run.sh"]
 
+# Expose main port (web interface and API)
 EXPOSE 80
-# Postgres port if you need to connect directly
+# Expose Postgres port if you need to connect directly to the database
 EXPOSE 5432
 
