@@ -22,6 +22,7 @@ CREATE TABLE note (
     trustworthysources integer NOT NULL,
     summary character varying(8192),
     ismedianote integer NOT NULL,
+    iscollaborativenote integer NOT NULL,
 
     summary_ts tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, (summary)::text)) STORED
 );
