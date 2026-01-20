@@ -25,7 +25,7 @@ if ! docker buildx version >/dev/null 2>&1; then
 fi
 
 echo "Building Docker image $IMAGE using $DOCKERFILE..."
-docker buildx build -f "$DOCKERFILE" -t "$IMAGE" .
+docker buildx build -f "$DOCKERFILE" -t "$IMAGE" . --load
 
 echo "Cleaning up any existing container named $CONTAINER_NAME..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
