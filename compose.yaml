@@ -2,6 +2,7 @@ services:
 
   db:
     image: postgres
+    container_name: x-notes-db
     restart: always
     # set shared memory limit when using docker-compose
     shm_size: 128mb
@@ -16,6 +17,7 @@ services:
 
   adminer:
     image: adminer
+    container_name: x-notes-adminer
     scale: 0
     restart: always
     environment:
@@ -27,6 +29,7 @@ services:
 
   postgrest:
     image: postgrest/postgrest
+    container_name: x-notes-postgrest
     ports:
       - "3000:3000"
     environment:
@@ -39,6 +42,7 @@ services:
 
   swagger:
     image: swaggerapi/swagger-ui
+    container_name: x-notes-swagger
     scale: 0
     ports:
       - "8081:8080"
@@ -49,6 +53,7 @@ services:
 
   nginx:
     image: nginx:alpine
+    container_name: x-notes-nginx
     ports:
       - "8080:80"
     volumes:

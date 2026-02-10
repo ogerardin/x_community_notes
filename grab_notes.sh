@@ -147,7 +147,7 @@ main() {
         load_tsv_to_db "$tsvfile"
     else
         echo "PostgreSQL is not running locally - trying docker container" >&2
-        load_tsv_to_db_docker "$tsvfile" "x-notes"
+        load_tsv_to_db_docker "$tsvfile" "x-notes-db"
     fi
 }
 
