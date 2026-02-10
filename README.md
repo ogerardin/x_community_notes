@@ -117,6 +117,49 @@ The monitoring should be integrated into the web interface in the future.
 ### Accessing the notes
 Open the following URL: http://localhost:8080
 
+### Building and Pushing Multi-Architecture Images
+
+The `build_multi.sh` script builds and pushes multi-architecture Docker images with automatic versioning.
+
+#### Versioning Strategy
+
+Images are tagged with semantic versions extracted from git tags:
+
+- **Tagged commit** (e.g., `git tag v1.0.0`): Image is tagged as `ogerardin/x-notes:1.0.0` and `ogerardin/x-notes:latest`
+- **Untagged commit**: Image is tagged with the short commit hash (e.g., `ogerardin/x-notes:abc1234`) and `ogerardin/x-notes:latest`
+
+#### Creating a Version Tag
+
+```bash
+# Create and push a semantic version tag
+git tag v1.0.0
+git push origin v1.0.0
+
+# Then build the image
+./build_multi.sh
+```
+
+This will build and push images tagged as `ogerardin/x-notes:1.0.0` and `ogerardin/x-notes:latest`.
+
+#### Building Without a Tag
+
+```bash
+# Build image with current commit hash as version
+./build_multi.sh
+```
+
+This will build and push images tagged as `ogerardin/x-notes:<commit-hash>` and `ogerardin/x-notes:latest`.
+
+#### Supported Platforms
+
+The build script targets the following platforms:
+- `linux/amd64`
+- `linux/arm64`
+- `linux/i386`
+- `linux/arm/v7`
+
+**Note:** Building multi-architecture images requires Docker Buildx and a compatible builder. The script will create the builder automatically if it doesn't exist.
+
 
 ### TODO
 - schedule the loader to run periodically
