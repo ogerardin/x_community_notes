@@ -9,18 +9,25 @@ echo ""
 # Simulate the versioning logic from build_multi.sh
 VERSION=$(git describe --tags --exact-match 2>/dev/null || echo "")
 if [ -z "$VERSION" ]; then
-  VERSION=$(git rev-parse --short HEAD)
-  echo "✓ No git tag found, using commit hash as version: $VERSION"
+  echo "✓ No git release tag found, will only push 'latest' tag"
+  PUSH_LATEST_ONLY=true
 else
   VERSION="${VERSION#v}"
   echo "✓ Using git tag version: $VERSION"
+  PUSH_LATEST_ONLY=false
 fi
 
 echo ""
-echo "Image tags that would be pushed:"
-echo "  - ogerardin/x-notes:$VERSION"
-echo "  - ogerardin/x-notes:latest"
-echo ""
-echo "Version label:"
-echo "  - org.opencontainers.image.version=$VERSION"
+if [ "$PUSH_LATEST_ONLY" = true ]; then
+  echo "Image tags that would be pushed:"
+  echo "  - ogerardin/x-notes:latest"
+else
+  echo "Image tags that would be pushed:"
+  echo "  - ogerardin/x-notes:$VERSION"
+  echo "  - ogerardin/x-notes:latest"
+  echo ""
+  echo "Version label:"
+  echo "  - org.opencontainers.image.version=$VERSION"
+fi
+
 

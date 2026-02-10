@@ -123,10 +123,10 @@ The `build_multi.sh` script builds and pushes multi-architecture Docker images w
 
 #### Versioning Strategy
 
-Images are tagged with semantic versions extracted from git tags:
+Images are tagged based on git release tags:
 
-- **Tagged commit** (e.g., `git tag v1.0.0`): Image is tagged as `ogerardin/x-notes:1.0.0` and `ogerardin/x-notes:latest`
-- **Untagged commit**: Image is tagged with the short commit hash (e.g., `ogerardin/x-notes:abc1234`) and `ogerardin/x-notes:latest`
+- **Tagged commit** (e.g., `git tag v1.0.0`): Image is tagged as both `ogerardin/x-notes:1.0.0` and `ogerardin/x-notes:latest`
+- **Untagged commit**: Image is tagged as `ogerardin/x-notes:latest` only (no version-specific tag)
 
 #### Creating a Version Tag
 
@@ -144,11 +144,11 @@ This will build and push images tagged as `ogerardin/x-notes:1.0.0` and `ogerard
 #### Building Without a Tag
 
 ```bash
-# Build image with current commit hash as version
+# Build image with current commit (untagged)
 ./build_multi.sh
 ```
 
-This will build and push images tagged as `ogerardin/x-notes:<commit-hash>` and `ogerardin/x-notes:latest`.
+This will build and push the image tagged as `ogerardin/x-notes:latest` only.
 
 #### Supported Platforms
 

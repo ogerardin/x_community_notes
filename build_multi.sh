@@ -5,9 +5,9 @@
 # The image is built from Dockerfile-alpine and pushed to the specified repository.
 #
 # Versioning:
-# - If the current commit is tagged with a semantic version (e.g., v1.0.0), that version is used
-# - Otherwise, the short commit hash is used as the version
-# - Both version-specific and "latest" tags are pushed
+# - If the current commit is tagged with a semantic version (e.g., v1.0.0), both the version-specific
+#   and "latest" tags are pushed
+# - If no release tag exists, only the "latest" tag is pushed
 
 set -euo pipefail
 
@@ -17,16 +17,17 @@ REPOSITORY="ogerardin/x-notes"
 DOCKERFILE="Dockerfile-alpine"
 BUILDER_NAME="mybuilder"
 
-# Extract version from git tag or use commit hash as fallback
+# Extract version from git tag
 VERSION=$(git describe --tags --exact-match 2>/dev/null || echo "")
 if [ -z "$VERSION" ]; then
-  # No exact tag match, use short commit hash
-  VERSION=$(git rev-parse --short HEAD)
-  echo "No git tag found, using commit hash as version: $VERSION"
+  # No exact tag match, only push 'latest'
+  echo "No git release tag found, will only push 'latest' tag"
+  PUSH_LATEST_ONLY=true
 else
   # Remove 'v' prefix if present (e.g., v1.0.0 -> 1.0.0)
   VERSION="${VERSION#v}"
   echo "Using git tag version: $VERSION"
+  PUSH_LATEST_ONLY=false
 fi
 
 # Check if buildx builder exists, create if not, otherwise use it
@@ -44,9 +45,16 @@ if ! docker buildx version &>/dev/null; then
   docker buildx install
 fi
 
-echo "Building and pushing multi-arch image: $REPOSITORY:$VERSION and $REPOSITORY:latest"
-docker buildx build --platform "$PLATFORMS" \
-  --tag "$REPOSITORY:$VERSION" \
-  --tag "$REPOSITORY:latest" \
-  --label "org.opencontainers.image.version=$VERSION" \
-  --file "$DOCKERFILE" . --push
+if [ "$PUSH_LATEST_ONLY" = true ]; then
+  echo "Building and pushing multi-arch image: $REPOSITORY:latest"
+  docker buildx build --platform "$PLATFORMS" \
+    --tag "$REPOSITORY:latest" \
+    --file "$DOCKERFILE" . --push
+else
+  echo "Building and pushing multi-arch image: $REPOSITORY:$VERSION and $REPOSITORY:latest"
+  docker buildx build --platform "$PLATFORMS" \
+    --tag "$REPOSITORY:$VERSION" \
+    --tag "$REPOSITORY:latest" \
+    --label "org.opencontainers.image.version=$VERSION" \
+    --file "$DOCKERFILE" . --push
+fi
