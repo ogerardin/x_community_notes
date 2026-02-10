@@ -2,15 +2,28 @@
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Note Search</title>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 2em; }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 1em;
+        }
+        h1 {
+            margin-top: 0;
+            font-size: 1.5em;
+        }
         table {
             border-collapse: separate;
             border-spacing: 0;
             width: 100%;
             margin-top: 1em;
+            font-size: 0.95em;
         }
         th, td {
             border: 1px solid #ccc;
@@ -27,8 +40,8 @@
             position: sticky;
             top: 0;
             z-index: 1;
-            /* Add box-shadow to create border effect that won't move */
             box-shadow: 0 1px 0 #ccc;
+            font-size: 0.9em;
         }
         .spinner-overlay {
             position: fixed;
@@ -41,12 +54,68 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             z-index: 1000;
         }
-        .search-bar { margin-bottom: 1em; }
+        .search-bar {
+            margin-bottom: 1em;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5em;
+        }
+        .search-input-wrapper {
+            flex: 1;
+            min-width: 200px;
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .search-bar input {
+            flex: 1;
+            padding: 0.5em;
+            padding-right: 2.5em;
+            font-size: 1em;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100%;
+        }
+        /* Hide browser's native search clear button */
+        .search-bar input::-webkit-search-cancel-button {
+            display: none;
+        }
+        .clear-btn {
+            position: absolute;
+            right: 0.4em;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.3em 0.5em;
+            font-size: 1.2em;
+            color: #999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .clear-btn:hover {
+            color: #666;
+        }
+        .search-bar button.search-btn {
+            padding: 0.5em 1em;
+            font-size: 1em;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        .search-bar button.search-btn:hover {
+            background: #0056b3;
+        }
         .error { color: #b00; margin-top: 1em; }
         .no-results { color: #555; margin-top: 1em; }
         .author-id {
             font-weight: bold;
             color: #fff;
+            padding: 0.25em 0.5em;
+            border-radius: 3px;
+            display: inline-block;
         }
         .sentinel {
             height: 20px;
@@ -54,6 +123,7 @@
         }
         .summary-cell {
             position: relative;
+            word-break: break-word;
         }
         .copy-btn, .link-btn {
             position: absolute;
@@ -76,6 +146,72 @@
         }
         .link-btn {
             right: 38px;
+        }
+        .info-row {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 0.5em;
+        }
+
+        /* Tablet styles */
+        @media (max-width: 768px) {
+            body {
+                padding: 0.5em;
+            }
+            h1 {
+                font-size: 1.2em;
+            }
+            .search-input-wrapper {
+                min-width: 150px;
+            }
+            table {
+                font-size: 0.85em;
+            }
+            th, td {
+                padding: 0.4em;
+            }
+            .copy-btn, .link-btn {
+                padding: 1px 4px;
+                font-size: 0.9em;
+            }
+            .link-btn {
+                right: 32px;
+            }
+        }
+
+        /* Mobile styles */
+        @media (max-width: 480px) {
+            body {
+                padding: 0.25em;
+            }
+            h1 {
+                font-size: 1.1em;
+                margin-bottom: 0.5em;
+            }
+            .search-input-wrapper {
+                min-width: 120px;
+            }
+            .search-bar button.search-btn {
+                padding: 0.5em 0.75em;
+                font-size: 0.95em;
+                white-space: nowrap;
+            }
+            table {
+                font-size: 0.8em;
+            }
+            th, td {
+                padding: 0.3em;
+            }
+            .copy-btn, .link-btn {
+                padding: 1px 3px;
+                font-size: 0.85em;
+            }
+            .link-btn {
+                right: 28px;
+            }
+            .info-row {
+                font-size: 0.8em;
+            }
         }
     </style>
 </head>
@@ -189,20 +325,19 @@
         </div>
     </template>
 
-    <div>
-        <p x-text="await countNotes() + ' notes, latest : ' + await latest()"> </p>
-    </div>
-
+    <div class="info-row" x-text="await countNotes() + ' notes, latest: ' + await latest()"></div>
 
     <div class="search-bar">
-        <input
-            x-model="search"
-            placeholder="Search..."
-            @keyup.enter="fetchItems()"
-            style="width: 300px;"
-            x-init="$el.focus()">
-        <button @click="fetchItems()">Search</button>
-        <button @click="search = ''">Clear</button>
+        <div class="search-input-wrapper">
+            <input
+                x-model="search"
+                type="search"
+                placeholder="Search..."
+                @keyup.enter="fetchItems()"
+                x-init="$el.focus()">
+            <button class="clear-btn" @click="search = ''" title="Clear search">✕</button>
+        </div>
+        <button class="search-btn" @click="fetchItems()">Search</button>
     </div>
 
     <div class="error" x-show="error" x-text="error"></div>
