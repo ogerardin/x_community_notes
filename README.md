@@ -65,7 +65,7 @@ the database using a script that runs inside the container.
 
 ### Build and start the Docker container
 ```bash
-  docker build --tag ogerardin/x-notes:latest --file Dockerfile-alpine . && \
+  docker build --tag ogerardin/x-notes:latest --file Dockerfile-dist . && \
   docker run --detach --name x-notes \
       --publish 8080:80 \
       --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data \

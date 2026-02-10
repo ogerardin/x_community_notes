@@ -14,7 +14,7 @@ set -euo pipefail
 # Configurable variables
 PLATFORMS="linux/amd64,linux/arm64,linux/i386,linux/arm/v7"
 REPOSITORY="ogerardin/x-notes"
-DOCKERFILE="Dockerfile-alpine"
+DOCKERFILE="Dockerfile-dist"
 BUILDER_NAME="mybuilder"
 
 # Extract version from git tag

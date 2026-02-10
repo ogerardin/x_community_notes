@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Builds a Docker image for the x-notes application using Dockerfile-alpine, then runs the container with appropriate
+# Builds a Docker image for the x-notes application using Dockerfile-dist, then runs the container with appropriate
 # volumes and ports for data and PostgreSQL persistence. Cleans up any previous container instance and ensures Docker
 # Buildx is available.
 
@@ -11,7 +11,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Configurable variables
-DOCKERFILE="Dockerfile-alpine"
+DOCKERFILE="Dockerfile-dist"
 IMAGE="ogerardin/x-notes:latest"
 CONTAINER_NAME="x-notes"
 HOST_PORT="8080"
