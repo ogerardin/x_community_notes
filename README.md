@@ -13,8 +13,8 @@ The architecture of the project is as follows:
 - PostgreSQL database to store the notes
 - PostgREST to provide a RESTful API for the database
 - Nginx as a reverse proxy for PostgREST and the web search interface
-- A loader script that fetches the notes from the Community Notes API and loads them into the database
-- A web search interface that allows users to search through the notes using full-text search and other filters
+- A loader script that fetches the notes from the Community Notes downloads page and loads them into the database
+- A web search interface (built using AlpineJS) that allows users to search through the notes using full-text search and other filters
 - Optionally, Swagger UI for API documentation and Adminer for database management
 
 The project can be run using Docker Compose or a single Docker container.
