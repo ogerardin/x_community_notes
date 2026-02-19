@@ -31,7 +31,7 @@ echo "Cleaning up any existing container named $CONTAINER_NAME..."
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 echo "Running container $CONTAINER_NAME..."
-docker run -p "$HOST_PORT":80 -p 5432:5432 \
+docker run -d -p "$HOST_PORT":80 -p 5432:5432 \
   -v "$DATA_PATH":/home/data \
   -v "$DB_VOLUME":/var/lib/postgresql/data \
   --name "$CONTAINER_NAME" "$IMAGE"
