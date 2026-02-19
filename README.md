@@ -67,11 +67,13 @@ You may also start the following services:
 
 ### Run the Loader
 
-To load the notes into the database, run the loader script:
+To load the notes into the database, trigger the import via API:
 
 ```bash
-  ./grab_notes.sh
+curl -X POST http://localhost:8080/api/import/trigger
 ```
+
+Or use the Admin UI at http://localhost:8080/admin.html
 
 ### Accessing the note search UI
 
@@ -103,10 +105,10 @@ This will start a container named `x-notes` with all the services running inside
 
 ### Running the loader
 
-To load the notes into the database, run the loader script inside the container:
+To load the notes into the database, trigger the import via API:
 
 ```bash
-    docker exec -it x-notes /bin/sh -c "cd /home && ./grab_notes.sh"
+curl -X POST http://localhost:8080/api/import/trigger
 ```
 
 #### Monitoring the loader

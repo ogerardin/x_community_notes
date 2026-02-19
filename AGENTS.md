@@ -21,11 +21,11 @@ docker compose up -d
 # Build and run single container
 ./build_and_run.sh
 
-# Load notes into database
-./grab_notes.sh
-
 # Build multi-architecture images
 ./build_multi.sh
+
+# Trigger import via API
+curl -X POST http://localhost:8080/api/import/trigger
 ```
 
 ## Key Files
@@ -34,11 +34,11 @@ docker compose up -d
 |------|---------|
 | `compose.yaml` | Docker Compose configuration |
 | `Dockerfile-dist` | Single container Dockerfile |
-| `grab_notes.sh` | Loader script - fetches notes from X public data and loads into PostgreSQL |
 | `build_and_run.sh` | Builds and runs single container |
 | `build_multi.sh` | Builds/pushes multi-arch Docker images with versioning |
 | `nginx.conf` | Nginx reverse proxy configuration |
 | `www/index.html` | Web search interface |
+| `www/admin.html` | Admin interface for triggering imports |
 | `sql/notes_ddl.sql` | Database schema definition |
 | `sql/pg_stat_progress_copy.sql` | Query for monitoring data loading progress |
 
@@ -75,5 +75,3 @@ docker compose up -d
 ## TODO
 
 - Schedule the loader to run periodically
-- Enable manual triggering of the loader through the web interface
-- Display the progress of the loader in the web interface

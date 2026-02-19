@@ -71,12 +71,9 @@ EOF
 # Copy the API server binary from builder
 COPY --from=builder /src/api-server /usr/local/bin/
 
-# TODO: Implement periodic import trigger via API endpoint or scheduled job
-# For now, import can be triggered manually via the web UI or:
-#   curl -X POST http://localhost:8888/import/trigger
-# RUN ln -s ${HOMEDIR}/grab_notes.sh /etc/periodic/daily/grab_notes.sh
+# Import can be triggered via API: curl -X POST http://localhost:8080/api/import/trigger
 
-# The grab_notes.sh script will store downloaded notes in the following volume; mount it to persist data
+# Data directory for downloaded notes
 VOLUME ["$HOMEDIR/data"]
 
 
