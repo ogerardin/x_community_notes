@@ -1,3 +1,21 @@
+FROM postgres:17-alpine AS builder
+
+ENV HOMEDIR=/home
+
+# Install Go for building the API server
+RUN apk add --no-cache go
+
+WORKDIR /src
+
+# Copy Go module files and download dependencies
+COPY cmd/api/go.mod cmd/api/go.sum ./
+RUN go mod download
+
+# Build the API server
+COPY cmd/api/*.go ./
+RUN CGO_ENABLED=0 GOOS=linux go build -o api-server
+
+# Final stage
 FROM postgres:17-alpine
 
 ENV POSTGRES_PASSWORD=example
@@ -39,6 +57,9 @@ http {
             root $HOMEDIR/www;
             autoindex on;
         }
+        location /api/import/ {
+            proxy_pass http://localhost:8888/import/;
+        }
         location /api/ {
             proxy_pass http://localhost:3000/;
         }
@@ -47,22 +68,25 @@ http {
 EOF
 
 
-# Add the script to grab notes
-COPY grab_notes.sh .
+# Copy the API server binary from builder
+COPY --from=builder /src/api-server /usr/local/bin/
 
-# Link it to the daily cron jobs
-RUN ln -s ${HOMEDIR}/grab_notes.sh /etc/periodic/daily/grab_notes.sh
+# TODO: Implement periodic import trigger via API endpoint or scheduled job
+# For now, import can be triggered manually via the web UI or:
+#   curl -X POST http://localhost:8888/import/trigger
+# RUN ln -s ${HOMEDIR}/grab_notes.sh /etc/periodic/daily/grab_notes.sh
 
 # The grab_notes.sh script will store downloaded notes in the following volume; mount it to persist data
 VOLUME ["$HOMEDIR/data"]
 
 
 # Create a script to serve as entrypoint to start all services
-# The script starts cron, Postgres, PostgREST, and Nginx
+# The script starts cron, Postgres, PostgREST, Nginx, and the API server
 COPY <<EOF run.sh
 /usr/sbin/crond -L /var/log/crond.log &
 /usr/local/bin/docker-entrypoint.sh postgres &
 /usr/local/bin/postgrest ${HOMEDIR}/postgrest.conf &
+/usr/local/bin/api-server &
 nginx -c ${HOMEDIR}/nginx.conf -g "daemon off;"
 EOF
 

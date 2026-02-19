@@ -11,7 +11,7 @@ services:
     volumes:
       - x-notes-db:/var/lib/postgresql/data
       - ./sql/notes_ddl.sql:/docker-entrypoint-initdb.d/notes_ddl.sql
-      - ./data:/data
+      - ./data:/home/data
     ports:
       - "5432:5432"
 
@@ -61,7 +61,21 @@ services:
       - ./www:/data/www
     depends_on:
       - postgrest
+      - api
+
+  api:
+    build:
+      context: ./cmd/api
+      dockerfile: Dockerfile
+    container_name: x-notes-api
+    environment:
+      - DB_HOST=db
+    depends_on:
+      - db
+    volumes:
+      - ./data:/home/data
 
 volumes:
   x-notes-db:
     name: x-notes-db
+    external: true
