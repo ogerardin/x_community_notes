@@ -36,6 +36,7 @@ var (
 )
 
 var db *sql.DB
+var currentJobID *string
 
 type ImportStatus struct {
 	Status             string     `json:"status"`
@@ -103,19 +104,24 @@ func runMigrations(db *sql.DB) error {
 func getImportStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
+	if currentJobID == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ImportStatus{Status: "idle"})
+		return
+	}
+
 	var status ImportStatus
 	var totalRows int
-	var pid int
 	var startedAt, completedAt sql.NullTime
 	var errorMessage sql.NullString
 	var downloadPct sql.NullInt64
 	var downloadSpeed, downloadETA sql.NullString
 
 	err := db.QueryRowContext(ctx, `
-		SELECT status, COALESCE(total_rows, 0), COALESCE(pid, 0), started_at, completed_at, error_message, 
+		SELECT status, COALESCE(total_rows, 0), started_at, completed_at, error_message, 
 		       COALESCE(download_percentage, 0), download_speed, download_eta
-		FROM import_status WHERE id = 1
-	`).Scan(&status.Status, &totalRows, &pid, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &downloadETA)
+		FROM import_history WHERE job_id = $1
+	`, *currentJobID).Scan(&status.Status, &totalRows, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &downloadETA)
 
 	if err != nil {
 		http.Error(w, "Failed to get import status: "+err.Error(), http.StatusInternalServerError)
@@ -123,9 +129,6 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status.TotalRows = &totalRows
-	if pid > 0 {
-		status.PID = &pid
-	}
 	if startedAt.Valid {
 		status.StartedAt = &startedAt.Time
 	}
@@ -146,7 +149,7 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 		status.DownloadETA = &downloadETA.String
 	}
 
-	if status.Status == "running" {
+	if status.Status == "importing" {
 		var tuplesProcessed int
 		err := db.QueryRowContext(ctx, `
 			SELECT COALESCE(tuples_processed, 0)
@@ -165,6 +168,83 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
+}
+
+func getImportHistory(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message, 
+		       download_percentage, download_speed, download_eta, rows_processed
+		FROM import_history 
+		ORDER BY started_at DESC 
+		LIMIT 50
+	`)
+	if err != nil {
+		http.Error(w, "Failed to get import history: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type HistoryEntry struct {
+		ID                 int        `json:"id"`
+		JobID              string     `json:"job_id"`
+		StartedAt          time.Time  `json:"started_at"`
+		CompletedAt        *time.Time `json:"completed_at,omitempty"`
+		TotalRows          *int       `json:"total_rows,omitempty"`
+		Status             string     `json:"status"`
+		ErrorMessage       *string    `json:"error_message,omitempty"`
+		DownloadPercentage *int       `json:"download_percentage,omitempty"`
+		DownloadSpeed      *string    `json:"download_speed,omitempty"`
+		DownloadETA        *string    `json:"download_eta,omitempty"`
+		RowsProcessed      *int       `json:"rows_processed,omitempty"`
+	}
+
+	var history []HistoryEntry
+	for rows.Next() {
+		var h HistoryEntry
+		var completedAt sql.NullTime
+		var totalRows sql.NullInt64
+		var errorMessage sql.NullString
+		var downloadPct sql.NullInt64
+		var downloadSpeed, downloadETA sql.NullString
+		var rowsProcessed sql.NullInt64
+
+		err := rows.Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &downloadETA, &rowsProcessed)
+		if err != nil {
+			continue
+		}
+
+		if completedAt.Valid {
+			h.CompletedAt = &completedAt.Time
+		}
+		if totalRows.Valid {
+			rows := int(totalRows.Int64)
+			h.TotalRows = &rows
+		}
+		if errorMessage.Valid {
+			h.ErrorMessage = &errorMessage.String
+		}
+		if downloadPct.Valid {
+			pct := int(downloadPct.Int64)
+			h.DownloadPercentage = &pct
+		}
+		if downloadSpeed.Valid {
+			h.DownloadSpeed = &downloadSpeed.String
+		}
+		if downloadETA.Valid {
+			h.DownloadETA = &downloadETA.String
+		}
+		if rowsProcessed.Valid {
+			rp := int(rowsProcessed.Int64)
+			h.RowsProcessed = &rp
+		}
+
+		history = append(history, h)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
 }
 
 func getDateDaysAgo(n int) string {
@@ -408,38 +488,40 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
-
-	var currentStatus string
-	err := db.QueryRowContext(ctx, `SELECT status FROM import_status WHERE id = 1`).Scan(&currentStatus)
-	if err != nil {
-		http.Error(w, "Failed to check status: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if currentStatus == "running" || currentStatus == "downloading" {
+	if currentJobID != nil {
 		http.Error(w, "Import already in progress", http.StatusConflict)
 		return
 	}
 
-	_, err = db.ExecContext(ctx, `UPDATE import_status SET status = 'downloading', started_at = NOW(), completed_at = NULL, error_message = NULL, total_rows = 0, download_percentage = 0, download_speed = NULL, download_eta = NULL WHERE id = 1`)
+	ctx := context.Background()
+
+	var jobID string
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO import_history (started_at, status, download_percentage, rows_processed)
+		VALUES (NOW(), 'downloading', 0, 0)
+		RETURNING job_id
+	`).Scan(&jobID)
 	if err != nil {
-		http.Error(w, "Failed to update status: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Failed to create import job: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	currentJobID = &jobID
 
 	go func() {
 		ctx := context.Background()
 
 		zipPath, err := downloadNotesWithProgress(ctx, 7)
 		if err != nil {
-			db.ExecContext(context.Background(), `UPDATE import_status SET status = 'failed', error_message = $1 WHERE id = 1`, err.Error())
+			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, err.Error(), jobID)
+			currentJobID = nil
 			return
 		}
 
 		tsvPath, err := extractTSV(zipPath)
 		if err != nil {
-			db.ExecContext(context.Background(), `UPDATE import_status SET status = 'failed', error_message = $1 WHERE id=1`, err.Error())
+			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, err.Error(), jobID)
+			currentJobID = nil
 			return
 		}
 
@@ -449,13 +531,45 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 			totalRows = 0
 		}
 
-		db.ExecContext(ctx, `UPDATE import_status SET status = 'running', download_percentage = 100, total_rows = $1 WHERE id = 1`, totalRows)
+		db.ExecContext(ctx, `UPDATE import_history SET status = 'importing', download_percentage = 100, total_rows = $1 WHERE job_id = $2`, totalRows, jobID)
+
+		done := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-done:
+					return
+				case <-time.After(500 * time.Millisecond):
+					var tuplesProcessed int
+					err := db.QueryRowContext(context.Background(), `SELECT COALESCE(tuples_processed, 0) FROM pg_stat_progress_copy LIMIT 1`).Scan(&tuplesProcessed)
+					if err == nil {
+						db.ExecContext(context.Background(), `UPDATE import_history SET rows_processed = $1 WHERE job_id = $2`, tuplesProcessed, jobID)
+					}
+				}
+			}
+		}()
 
 		err = importTSV(ctx, tsvPath)
+		close(done)
 		if err != nil {
-			db.ExecContext(context.Background(), `UPDATE import_status SET status = 'failed', error_message = $1 WHERE id = 1`, err.Error())
+			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, err.Error(), jobID)
+			currentJobID = nil
 			return
 		}
+
+		var count int
+		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM note`).Scan(&count)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to count rows: %v\n", err)
+		}
+
+		_, err = db.ExecContext(ctx, `UPDATE import_history SET status = 'completed', total_rows = $1, completed_at = NOW() WHERE job_id = $2`, count, jobID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to update status: %v\n", err)
+		}
+
+		currentJobID = nil
+		fmt.Printf("Imported %d rows\n", count)
 	}()
 
 	w.WriteHeader(http.StatusAccepted)
@@ -468,12 +582,8 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func sanitizeImportStatus() {
-	_, err := db.Exec(`UPDATE import_status SET status = 'idle' WHERE status IN ('running', 'downloading')`)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to sanitize import status: %v\n", err)
-	} else {
-		fmt.Println("Sanitized import status (reset any interrupted imports)")
-	}
+	currentJobID = nil
+	fmt.Println("Cleared any running import jobs")
 }
 
 func main() {
@@ -487,6 +597,7 @@ func main() {
 
 	http.HandleFunc("/health", healthCheck)
 	http.HandleFunc("/import/status", getImportStatus)
+	http.HandleFunc("/import/history", getImportHistory)
 	http.HandleFunc("/import/trigger", triggerImport)
 
 	fmt.Printf("Starting API server on port %s\n", port)

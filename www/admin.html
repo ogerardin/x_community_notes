@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Note Search</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 1em;
+        }
+        h1 {
+            margin-top: 0;
+            font-size: 1.5em;
+        }
+        .nav-link {
+            font-size: 0.9em;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+        .info-row {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 1em;
+            display: flex;
+            align-items: center;
+            gap: 1em;
+        }
+        .import-btn:disabled {
+            background: #6c757d !important;
+            cursor: not-allowed;
+        }
+        .import-btn {
+            padding: 0.5em 1em;
+            font-size: 1em;
+            cursor: pointer;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        .import-btn:hover {
+            background: #218838;
+        }
+        .import-status {
+            font-size: 0.9em;
+        }
+        .error {
+            color: #dc3545;
+            margin-bottom: 0.5em;
+        }
+        .refresh-btn {
+            padding: 2px 8px;
+            font-size: 0.9em;
+            cursor: pointer;
+            background: #f4f4f4;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .history-section {
+            margin-top: 2em;
+        }
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+            margin-top: 0.5em;
+        }
+        .history-table th, .history-table td {
+            border: 1px solid #ccc;
+            padding: 0.5em;
+            text-align: left;
+        }
+        .history-table th {
+            background: #f4f4f4;
+        }
+        .status-completed { color: #28a745; }
+        .status-failed { color: #dc3545; }
+        .status-importing { color: #007bff; }
+        .status-downloading { color: #007bff; }
+        .status-idle { color: #666; }
+        .progress-cell {
+            font-size: 0.85em;
+            color: #007bff;
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 0.25em;
+            }
+            h1 {
+                font-size: 1.1em;
+            }
+            .info-row {
+                font-size: 0.8em;
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+<h1>Admin <a href="/index.html" class="nav-link" style="font-size: 0.6em; margin-left: 1em;">Search</a></h1>
+
+<div x-data="{
+        noteCount: 0,
+        latestTimestamp: null,
+        importStatus: null,
+        importError: '',
+        importPollInterval: null,
+        importHistory: [],
+        async refreshNoteStats() {
+            try {
+                let resp = await fetch('/api/note?select=summary.count()');
+                let data = await resp.json();
+                this.noteCount = data[0]?.count ?? 0;
+                
+                resp = await fetch('/api/note?select=createdatmillis.max()');
+                data = await resp.json();
+                this.latestTimestamp = data[0]?.max ?? 0;
+            } catch (e) {
+                console.error('Failed to fetch note stats:', e);
+            }
+        },
+        async fetchImportStatus() {
+            try {
+                let resp = await fetch('/api/import/status');
+                if (!resp.ok) throw new Error('Failed to fetch import status');
+                this.importStatus = await resp.json();
+                if (this.importStatus.status === 'importing' || this.importStatus.status === 'downloading') {
+                    this.startPolling();
+                } else {
+                    this.stopPolling();
+                }
+            } catch (e) {
+                this.importError = e.message;
+            }
+        },
+        async fetchImportHistory() {
+            try {
+                let resp = await fetch('/api/import/history');
+                if (!resp.ok) throw new Error('Failed to fetch import history');
+                this.importHistory = await resp.json() || [];
+            } catch (e) {
+                console.error('Failed to fetch import history:', e);
+            }
+        },
+        async triggerImport() {
+            try {
+                this.importError = '';
+                let resp = await fetch('/api/import/trigger', { method: 'POST' });
+                if (resp.status === 409) {
+                    this.importError = 'Import already in progress';
+                    return;
+                }
+                if (!resp.ok) throw new Error('Failed to trigger import');
+                this.fetchImportStatus();
+                this.fetchImportHistory();
+            } catch (e) {
+                this.importError = e.message;
+            }
+        },
+        startPolling() {
+            if (this.importPollInterval) return;
+            this.importPollInterval = setInterval(() => {
+                this.fetchImportStatus();
+                this.refreshNoteStats();
+                this.fetchImportHistory();
+            }, 1000);
+        },
+        stopPolling() {
+            if (this.importPollInterval) {
+                clearInterval(this.importPollInterval);
+                this.importPollInterval = null;
+            }
+        },
+        init() {
+            this.fetchImportStatus();
+            this.refreshNoteStats();
+            this.fetchImportHistory();
+        },
+
+    }">
+
+    <div class="info-row">
+        <span x-text="noteCount.toLocaleString() + ' notes, latest: ' + (latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A')"></span>
+        <button @click="refreshNoteStats(); fetchImportHistory();" class="refresh-btn">Refresh</button>
+    </div>
+
+    <div class="import-bar" style="margin-bottom: 1em;">
+        <button 
+            class="import-btn" 
+            @click="triggerImport()"
+            x-bind:disabled="importStatus?.status === 'importing' || importStatus?.status === 'downloading'"
+        >
+            Import Notes
+        </button>
+        <span x-show="importError" class="error" style="margin-left: 1em;" x-text="importError"></span>
+    </div>
+
+    <div class="history-section">
+        <h2 style="font-size: 1.2em; margin-bottom: 0.5em;">Import History</h2>
+        <table class="history-table" x-show="importHistory.length > 0">
+            <thead>
+                <tr>
+                    <th>Started</th>
+                    <th>Completed</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                    <th>Rows</th>
+                    <th>Error</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="h in importHistory" :key="h.id">
+                    <tr>
+                        <td x-text="new Date(h.started_at).toLocaleString()"></td>
+                        <td x-text="h.completed_at ? new Date(h.completed_at).toLocaleString() : '-'"></td>
+                        <td>
+                            <span :class="'status-' + h.status" x-text="h.status"></span>
+                        </td>
+                        <td>
+                            <template x-if="h.status === 'downloading'">
+                                <span class="progress-cell">
+                                    Downloading: <span x-text="h.download_percentage"></span>%
+                                </span>
+                            </template>
+                            <template x-if="h.status === 'importing'">
+                                <span class="progress-cell">
+                                    <span x-text="h.rows_processed ?? 0"></span> / 
+                                    <span x-text="h.total_rows ?? 0"></span> rows
+                                </span>
+                            </template>
+                            <span x-show="h.status === 'idle' || h.status === 'completed' || h.status === 'failed'">-</span>
+                        </td>
+                        <td x-text="h.total_rows?.toLocaleString() ?? '-'"></td>
+                        <td x-text="h.error_message ?? '-'"></td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+        <div x-show="importHistory.length === 0" style="color: #666; margin-top: 0.5em;">No import history</div>
+    </div>
+
+</div>
+</body>
+</html>
