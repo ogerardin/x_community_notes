@@ -108,6 +108,10 @@
         .search-bar button.search-btn:hover {
             background: #0056b3;
         }
+        .import-btn:disabled {
+            background: #6c757d !important;
+            cursor: not-allowed;
+        }
         .error { color: #b00; margin-top: 1em; }
         .no-results { color: #555; margin-top: 1em; }
         .author-id {
@@ -225,6 +229,11 @@
         error: '',
         offset: 0,
         hasMore: true,
+        noteCount: 0,
+        latestTimestamp: null,
+        importStatus: null,
+        importError: '',
+        importPollInterval: null,
         async fetchItems(append = false) {
             if (!append) {
                 this.items = [];
@@ -282,6 +291,8 @@
         },
         init() {
             this.setupInfiniteScroll();
+            this.fetchImportStatus();
+            this.refreshNoteStats();
         },
         formatSummary(summary) {
             if (!summary) return '';
@@ -315,6 +326,65 @@
             let hue = Math.abs(hash) % 360;
             return `hsl(${hue}, 60%, 45%)`;
         },
+        async refreshNoteStats() {
+            try {
+                let resp = await fetch('/api/note?select=summary.count()');
+                let data = await resp.json();
+                this.noteCount = data[0]?.count ?? 0;
+                
+                resp = await fetch('/api/note?select=createdatmillis.max()');
+                data = await resp.json();
+                this.latestTimestamp = data[0]?.max ?? 0;
+            } catch (e) {
+                console.error('Failed to fetch note stats:', e);
+            }
+        },
+        async fetchImportStatus() {
+            try {
+                let resp = await fetch('/api/import/status');
+                if (!resp.ok) throw new Error('Failed to fetch import status');
+                this.importStatus = await resp.json();
+                if (this.importStatus.status === 'running') {
+                    this.startPolling();
+                } else {
+                    this.stopPolling();
+                }
+            } catch (e) {
+                this.importError = e.message;
+            }
+        },
+        async triggerImport() {
+            try {
+                this.importError = '';
+                let resp = await fetch('/api/import/trigger', { method: 'POST' });
+                if (resp.status === 409) {
+                    this.importError = 'Import already in progress';
+                    return;
+                }
+                if (!resp.ok) throw new Error('Failed to trigger import');
+                this.fetchImportStatus();
+            } catch (e) {
+                this.importError = e.message;
+            }
+        },
+        startPolling() {
+            if (this.importPollInterval) return;
+            this.importPollInterval = setInterval(() => {
+                this.fetchImportStatus();
+                this.refreshNoteStats();
+            }, 1000);
+        },
+        stopPolling() {
+            if (this.importPollInterval) {
+                clearInterval(this.importPollInterval);
+                this.importPollInterval = null;
+            }
+        },
+        init() {
+            this.setupInfiniteScroll();
+            this.fetchImportStatus();
+            this.refreshNoteStats();
+        },
 
     }">
 
@@ -325,7 +395,47 @@
         </div>
     </template>
 
-    <div class="info-row" x-text="await countNotes() + ' notes, latest: ' + await latest()"></div>
+    <div class="info-row" x-text="noteCount.toLocaleString() + ' notes, latest: ' + (latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A')"></div>
+
+    <!-- Import UI -->
+    <div class="import-bar" style="margin-bottom: 1em; display: flex; align-items: center; gap: 1em;">
+        <button 
+            class="import-btn" 
+            @click="triggerImport()"
+            x-bind:disabled="importStatus?.status === 'running'"
+            style="padding: 0.5em 1em; font-size: 1em; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 4px;"
+        >
+            Import Notes
+        </button>
+        <div class="import-status" style="font-size: 0.9em;">
+            <template x-if="importStatus?.status === 'downloading'">
+                <span style="color: #007bff;">
+                    Downloading: <span x-text="importStatus.download_percentage"></span>%
+                    <span x-text="importStatus.download_speed"></span>
+                    ETA: <span x-text="importStatus.download_eta"></span>
+                </span>
+            </template>
+            <template x-if="importStatus?.status === 'running'">
+                <span style="color: #007bff;">
+                    Importing: <span x-text="importStatus.rows_processed"></span> / 
+                    <span x-text="importStatus.total_rows"></span> rows 
+                    (<span x-text="importStatus.percentage"></span>%)
+                </span>
+            </template>
+            <template x-if="importStatus?.status === 'completed'">
+                <span style="color: #28a745;">Import completed</span>
+            </template>
+            <template x-if="importStatus?.status === 'failed'">
+                <span style="color: #dc3545;">
+                    Import failed: <span x-text="importStatus.error_message"></span>
+                </span>
+            </template>
+            <template x-if="importStatus?.status === 'idle'">
+                <span style="color: #666;">Ready to import</span>
+            </template>
+        </div>
+    </div>
+    <div class="error" x-show="importError" x-text="importError" style="color: #dc3545; margin-bottom: 0.5em;"></div>
 
     <div class="search-bar">
         <div class="search-input-wrapper">
