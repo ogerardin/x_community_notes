@@ -5,6 +5,23 @@ set -e
 DATADIR="data"
 FORCE_DOWNLOAD=0
 
+update_import_status() {
+    local status="$1"
+    local total_rows="${2:-0}"
+    local error_message="${3:-}"
+    
+    local completed_at=""
+    if [ "$status" = "completed" ] || [ "$status" = "failed" ]; then
+        completed_at=", completed_at=NOW()"
+    fi
+    
+    if [ -n "$error_message" ]; then
+        error_msg=", error_message='$error_message'"
+    fi
+    
+    psql -U postgres -c "UPDATE import_status SET status='$status', total_rows=$total_rows$completed_at$error_msg WHERE id=1;" 2>/dev/null || true
+}
+
 # Portable date functions that work on any Linux system
 format_date() {
     local input_date="$1"
@@ -80,14 +97,26 @@ get_container_path() {
 # Load the TSV file into the local PostgreSQL database
 load_tsv_to_db() {
     local tsvfile="$1"
+    
+    local total_rows
+    if [ -s "$tsvfile" ]; then
+        total_rows=$(($(wc -l < "$tsvfile") - 1))
+    else
+        total_rows=0
+    fi
+    update_import_status "running" "$total_rows"
 
     echo "Loading $tsvfile into local PostgreSQL..." >&2
 
     # clear the table and copy the data
     echo "  truncating existing note table..." >&2
     psql -U postgres -c "truncate note;"
-    echo "  copying data from $tsvfile..." >&2
-    psql -U postgres -c "\copy note FROM '$tsvfile' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)"
+    echo "  copying data from $tsvfile ($total_rows rows)..." >&2
+    if ! psql -U postgres -c "\copy note FROM '$tsvfile' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)"; then
+        update_import_status "failed" 0 "Copy failed"
+        return 1
+    fi
+    update_import_status "completed" "$total_rows"
 }
 
 # Load the TSV file into the PostgreSQL database running in a Docker container
@@ -95,19 +124,32 @@ load_tsv_to_db_docker() {
     local tsvfile="$1"
     local container="$2"
 
-    echo "Loading $tsvfile into PostgreSQL..." >&2
-
     # Find the mount point in the container that matches the local file path
     local mounted_file
-    mounted_file=$(get_container_path "$tsvfile" "$container") || return 1
+    mounted_file=$(get_container_path "$tsvfile" "$container") || { update_import_status "failed" 0 "Could not map file path"; return 1; }
     echo "  mapped $tsvfile to $mounted_file in container $container." >&2
+    
+    # Get total row count from local file
+    local total_rows
+    if [ -s "$tsvfile" ]; then
+        total_rows=$(($(wc -l < "$tsvfile") - 1))
+    else
+        total_rows=0
+    fi
+    update_import_status "running" "$total_rows"
+
+    echo "Loading $tsvfile into PostgreSQL..." >&2
 
     # clear the table and copy the data
     echo "  truncating existing note table..." >&2
     docker exec -it "$container" psql -U postgres -c "truncate note;"
-    echo "  copying data from $mounted_file..." >&2
-    docker exec -it "$container" \
-      psql -U postgres -c "\copy note FROM '$mounted_file' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)"
+    echo "  copying data from $mounted_file ($total_rows rows)..." >&2
+    if ! docker exec -it "$container" \
+      psql -U postgres -c "\copy note FROM '$mounted_file' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)"; then
+        update_import_status "failed" 0 "Copy failed"
+        return 1
+    fi
+    update_import_status "completed" "$total_rows"
 }
 
 get_latest_notes_file() {
@@ -132,6 +174,8 @@ get_latest_notes_file() {
 
 main() {
     local zipfile tsvfile
+    
+    trap 'update_import_status "failed" 0 "Script error: $?"' ERR
 
     # Ensure the data directory exists so downloads succeed
     mkdir -p "$DATADIR"

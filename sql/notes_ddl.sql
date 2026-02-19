@@ -35,3 +35,14 @@ CREATE INDEX idx3yl33mmhbcw582lic7c7fqqu4 ON public.note USING btree (createdatm
 CREATE INDEX idxovqwtw36x36lo9smq4lbxjcps ON public.note USING btree (noteauthorparticipantid);
 CREATE INDEX idxu0f5st3d4b4c55eh9kqyd3yk ON public.note USING btree (tweetid);
 CREATE INDEX ts_idx ON public.note USING gin (summary_ts);
+
+-- Import status tracking table
+CREATE TABLE import_status (
+    id SERIAL PRIMARY KEY,
+    started_at TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP,
+    total_rows INT,
+    status TEXT CHECK (status IN ('running', 'completed', 'failed', 'idle')) DEFAULT 'idle',
+    error_message TEXT
+);
+INSERT INTO import_status (status) VALUES ('idle');
