@@ -49,7 +49,9 @@ type ImportStatus struct {
 	ErrorMessage       *string    `json:"error_message,omitempty"`
 	DownloadPercentage *int       `json:"download_percentage,omitempty"`
 	DownloadSpeed      *string    `json:"download_speed,omitempty"`
-	DownloadETA        *string    `json:"download_eta,omitempty"`
+	FileName           *string    `json:"file_name,omitempty"`
+	FileSize           *int64     `json:"file_size,omitempty"`
+	ImportDuration     *int       `json:"import_duration,omitempty"`
 }
 
 func initDBWithRetry(maxRetries int, delay time.Duration) error {
@@ -115,13 +117,16 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 	var startedAt, completedAt sql.NullTime
 	var errorMessage sql.NullString
 	var downloadPct sql.NullInt64
-	var downloadSpeed, downloadETA sql.NullString
+	var downloadSpeed sql.NullString
+	var fileName sql.NullString
+	var fileSize sql.NullInt64
+	var importDuration sql.NullInt64
 
 	err := db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(total_rows, 0), started_at, completed_at, error_message, 
-		       COALESCE(download_percentage, 0), download_speed, download_eta
+		       COALESCE(download_percentage, 0), download_speed, file_name, file_size, import_duration
 		FROM import_history WHERE job_id = $1
-	`, *currentJobID).Scan(&status.Status, &totalRows, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &downloadETA)
+	`, *currentJobID).Scan(&status.Status, &totalRows, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &fileName, &fileSize, &importDuration)
 
 	if err != nil {
 		http.Error(w, "Failed to get import status: "+err.Error(), http.StatusInternalServerError)
@@ -145,8 +150,15 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 	if downloadSpeed.Valid {
 		status.DownloadSpeed = &downloadSpeed.String
 	}
-	if downloadETA.Valid {
-		status.DownloadETA = &downloadETA.String
+	if fileName.Valid {
+		status.FileName = &fileName.String
+	}
+	if fileSize.Valid {
+		status.FileSize = &fileSize.Int64
+	}
+	if importDuration.Valid {
+		id := int(importDuration.Int64)
+		status.ImportDuration = &id
 	}
 
 	if status.Status == "importing" {
@@ -175,7 +187,7 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message, 
-		       download_percentage, download_speed, download_eta, rows_processed
+		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_name, file_size
 		FROM import_history 
 		ORDER BY started_at DESC 
 		LIMIT 50
@@ -196,8 +208,12 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 		ErrorMessage       *string    `json:"error_message,omitempty"`
 		DownloadPercentage *int       `json:"download_percentage,omitempty"`
 		DownloadSpeed      *string    `json:"download_speed,omitempty"`
-		DownloadETA        *string    `json:"download_eta,omitempty"`
 		RowsProcessed      *int       `json:"rows_processed,omitempty"`
+		DownloadCached     *bool      `json:"download_cached,omitempty"`
+		DownloadDuration   *int       `json:"download_duration,omitempty"`
+		ImportDuration     *int       `json:"import_duration,omitempty"`
+		FileName           *string    `json:"file_name,omitempty"`
+		FileSize           *int64     `json:"file_size,omitempty"`
 	}
 
 	var history []HistoryEntry
@@ -207,10 +223,15 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 		var totalRows sql.NullInt64
 		var errorMessage sql.NullString
 		var downloadPct sql.NullInt64
-		var downloadSpeed, downloadETA sql.NullString
+		var downloadSpeed sql.NullString
 		var rowsProcessed sql.NullInt64
+		var downloadCached sql.NullBool
+		var downloadDuration sql.NullInt64
+		var importDuration sql.NullInt64
+		var fileName sql.NullString
+		var fileSize sql.NullInt64
 
-		err := rows.Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &downloadETA, &rowsProcessed)
+		err := rows.Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileName, &fileSize)
 		if err != nil {
 			continue
 		}
@@ -232,12 +253,26 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 		if downloadSpeed.Valid {
 			h.DownloadSpeed = &downloadSpeed.String
 		}
-		if downloadETA.Valid {
-			h.DownloadETA = &downloadETA.String
-		}
 		if rowsProcessed.Valid {
 			rp := int(rowsProcessed.Int64)
 			h.RowsProcessed = &rp
+		}
+		if downloadCached.Valid {
+			h.DownloadCached = &downloadCached.Bool
+		}
+		if downloadDuration.Valid {
+			dd := int(downloadDuration.Int64)
+			h.DownloadDuration = &dd
+		}
+		if importDuration.Valid {
+			id := int(importDuration.Int64)
+			h.ImportDuration = &id
+		}
+		if fileName.Valid {
+			h.FileName = &fileName.String
+		}
+		if fileSize.Valid {
+			h.FileSize = &fileSize.Int64
 		}
 
 		history = append(history, h)
@@ -273,6 +308,8 @@ type progressTracker struct {
 	lastPct    int
 	startTime  time.Time
 	ctx        context.Context
+	jobID      string
+	fileName   string
 }
 
 func (pt *progressTracker) Read(p []byte) (int, error) {
@@ -280,7 +317,6 @@ func (pt *progressTracker) Read(p []byte) (int, error) {
 	pt.bytesRead += int64(n)
 
 	now := time.Now()
-	elapsed := now.Sub(pt.startTime)
 	currentPct := 0
 	if pt.totalBytes > 0 {
 		currentPct = int((pt.bytesRead * 100) / pt.totalBytes)
@@ -290,18 +326,16 @@ func (pt *progressTracker) Read(p []byte) (int, error) {
 		pt.lastPct = currentPct
 		pt.lastUpdate = now
 
-		var speedStr, etaStr string
+		elapsed := now.Sub(pt.startTime)
+		var speedStr string
 		if elapsed > 0 {
 			bytesPerSec := float64(pt.bytesRead) / elapsed.Seconds()
 			speedStr = formatSpeed(bytesPerSec)
-			remaining := pt.totalBytes - pt.bytesRead
-			etaSec := remaining / int64(bytesPerSec)
-			etaStr = formatDuration(etaSec)
 		}
 
 		db.ExecContext(pt.ctx,
-			`UPDATE import_status SET download_percentage = $1, download_speed = $2, download_eta = $3 WHERE id = 1`,
-			currentPct, speedStr, etaStr)
+			`UPDATE import_history SET download_percentage = $1, download_speed = $2, download_duration = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER, file_name = $3, file_size = $4 WHERE job_id = $5`,
+			currentPct, speedStr, pt.fileName, pt.totalBytes, pt.jobID)
 	}
 
 	return n, err
@@ -326,9 +360,9 @@ func formatDuration(seconds int64) string {
 	}
 }
 
-func downloadNotesWithProgress(ctx context.Context, lookbackDays int) (string, error) {
+func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID string) (string, int64, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create data directory: %w", err)
+		return "", 0, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
 	for i := 0; i < lookbackDays; i++ {
@@ -340,7 +374,8 @@ func downloadNotesWithProgress(ctx context.Context, lookbackDays int) (string, e
 
 		if _, err := os.Stat(filepath); err == nil {
 			fmt.Printf("File already exists: %s\n", filepath)
-			return filepath, nil
+			info, _ := os.Stat(filepath)
+			return filepath, info.Size(), nil
 		}
 
 		fmt.Printf("Downloading %s to %s...\n", url, filepath)
@@ -369,25 +404,27 @@ func downloadNotesWithProgress(ctx context.Context, lookbackDays int) (string, e
 			startTime:  time.Now(),
 			lastUpdate: time.Now(),
 			ctx:        ctx,
+			jobID:      jobID,
+			fileName:   filename,
 		}
 
 		outFile, err := os.Create(filepath)
 		if err != nil {
-			return "", fmt.Errorf("failed to create file: %w", err)
+			return "", 0, fmt.Errorf("failed to create file: %w", err)
 		}
 		defer outFile.Close()
 
 		_, err = io.Copy(outFile, tracker)
 		if err != nil {
 			os.Remove(filepath)
-			return "", fmt.Errorf("failed to write file: %w", err)
+			return "", 0, fmt.Errorf("failed to write file: %w", err)
 		}
 
 		fmt.Printf("Downloaded %s\n", filepath)
-		return filepath, nil
+		return filepath, totalBytes, nil
 	}
 
-	return "", fmt.Errorf("failed to download notes file for last %d days", lookbackDays)
+	return "", 0, fmt.Errorf("failed to download notes file for last %d days", lookbackDays)
 }
 
 func extractTSV(zipPath string) (string, error) {
@@ -511,16 +548,18 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx := context.Background()
 
-		zipPath, err := downloadNotesWithProgress(ctx, 7)
+		zipPath, fileSize, err := downloadNotesWithProgress(ctx, 7, jobID)
 		if err != nil {
-			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, err.Error(), jobID)
+			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1 WHERE job_id = $2`, err.Error(), jobID)
 			currentJobID = nil
 			return
 		}
 
+		fileName := filepath.Base(zipPath)
+
 		tsvPath, err := extractTSV(zipPath)
 		if err != nil {
-			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, err.Error(), jobID)
+			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1 WHERE job_id = $2`, err.Error(), jobID)
 			currentJobID = nil
 			return
 		}
@@ -531,7 +570,7 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 			totalRows = 0
 		}
 
-		db.ExecContext(ctx, `UPDATE import_history SET status = 'importing', download_percentage = 100, total_rows = $1 WHERE job_id = $2`, totalRows, jobID)
+		db.ExecContext(ctx, `UPDATE import_history SET status = 'importing', download_percentage = 100, total_rows = $1, file_name = $2, file_size = $3, import_started_at = NOW() WHERE job_id = $4`, totalRows, fileName, fileSize, jobID)
 
 		done := make(chan struct{})
 		go func() {
@@ -543,7 +582,7 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 					var tuplesProcessed int
 					err := db.QueryRowContext(context.Background(), `SELECT COALESCE(tuples_processed, 0) FROM pg_stat_progress_copy LIMIT 1`).Scan(&tuplesProcessed)
 					if err == nil {
-						db.ExecContext(context.Background(), `UPDATE import_history SET rows_processed = $1 WHERE job_id = $2`, tuplesProcessed, jobID)
+						db.ExecContext(context.Background(), `UPDATE import_history SET rows_processed = $1, import_duration = EXTRACT(EPOCH FROM (NOW() - import_started_at))::INTEGER WHERE job_id = $2`, tuplesProcessed, jobID)
 					}
 				}
 			}
@@ -582,7 +621,19 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 func sanitizeImportStatus() {
+	ctx := context.Background()
 	currentJobID = nil
+
+	_, err := db.ExecContext(ctx, `
+		UPDATE import_history 
+		SET status = 'failed', error_message = 'Interrupted'
+		WHERE status IN ('importing', 'downloading')
+	`)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to sanitize import status: %v\n", err)
+		return
+	}
+
 	fmt.Println("Cleared any running import jobs")
 }
 

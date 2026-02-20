@@ -88,7 +88,8 @@
         .status-downloading { color: #007bff; }
         .status-idle { color: #666; }
         .progress-cell {
-            font-size: 0.85em;
+        }
+        .progress-cell.active {
             color: #007bff;
         }
 
@@ -116,6 +117,31 @@
         importError: '',
         importPollInterval: null,
         importHistory: [],
+        formatDuration(seconds) {
+            if (!seconds) return '';
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return m > 0 ? (s > 0 ? m + 'm ' + s + 's' : m + 'm') : s + 's';
+        },
+        formatFileSize(bytes) {
+            if (!bytes) return '';
+            if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+            if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
+            return Math.round(bytes / 1e3) + ' KB';
+        },
+        calculateRemaining(rowsProcessed, totalRows, duration) {
+            if (!rowsProcessed || !totalRows || !duration) return '';
+            const rate = rowsProcessed / duration;
+            const remaining = totalRows - rowsProcessed;
+            const remainingSeconds = Math.round(remaining / rate);
+            return this.formatDuration(remainingSeconds);
+        },
+        calculateDownloadRemaining(bytesRead, totalBytes, duration) {
+            if (!bytesRead || !totalBytes || !duration) return '';
+            const rate = bytesRead / duration;
+            const remaining = totalBytes - bytesRead;
+            return this.formatDuration(Math.round(remaining / rate));
+        },
         async refreshNoteStats() {
             try {
                 let resp = await fetch('/api/note?select=summary.count()');
@@ -200,7 +226,7 @@
             @click="triggerImport()"
             x-bind:disabled="importStatus?.status === 'importing' || importStatus?.status === 'downloading'"
         >
-            Import Notes
+            Update Notes
         </button>
         <span x-show="importError" class="error" style="margin-left: 1em;" x-text="importError"></span>
     </div>
@@ -212,9 +238,10 @@
                 <tr>
                     <th>Started</th>
                     <th>Completed</th>
+                    <th>File</th>
                     <th>Status</th>
-                    <th>Progress</th>
-                    <th>Rows</th>
+                    <th>Download progress</th>
+                    <th>Import progress</th>
                     <th>Error</th>
                 </tr>
             </thead>
@@ -222,25 +249,31 @@
                 <template x-for="h in importHistory" :key="h.id">
                     <tr>
                         <td x-text="new Date(h.started_at).toLocaleString()"></td>
-                        <td x-text="h.completed_at ? new Date(h.completed_at).toLocaleString() : '-'"></td>
+                        <td x-text="h.status === 'completed' && h.completed_at ? new Date(h.completed_at).toLocaleString() : '-'"></td>
+                        <td x-text="h.file_name ?? '-'"></td>
                         <td>
                             <span :class="'status-' + h.status" x-text="h.status"></span>
                         </td>
                         <td>
                             <template x-if="h.status === 'downloading'">
-                                <span class="progress-cell">
-                                    Downloading: <span x-text="h.download_percentage"></span>%
-                                </span>
+                                <span class="progress-cell active" x-text="(h.download_percentage ?? 0) + '% of ' + formatFileSize(h.file_size) + ' (remaining: ' + calculateDownloadRemaining(Math.round((h.download_percentage ?? 0) / 100 * h.file_size), h.file_size, h.download_duration) + ')'"></span>
                             </template>
-                            <template x-if="h.status === 'importing'">
-                                <span class="progress-cell">
-                                    <span x-text="h.rows_processed ?? 0"></span> / 
-                                    <span x-text="h.total_rows ?? 0"></span> rows
-                                </span>
+                            <template x-if="h.status !== 'downloading' && h.download_cached">
+                                <span class="progress-cell">(cached)</span>
                             </template>
-                            <span x-show="h.status === 'idle' || h.status === 'completed' || h.status === 'failed'">-</span>
+                            <span x-show="h.status !== 'downloading' && !h.download_cached" class="progress-cell" x-text="h.file_size ? formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) : (h.download_duration ? 'done in ' + formatDuration(h.download_duration) : 'done')"></span>
                         </td>
-                        <td x-text="h.total_rows?.toLocaleString() ?? '-'"></td>
+                        <td>
+                            <template x-if="h.status === 'importing'">
+                                <span class="progress-cell active">
+                                    <span x-text="Math.round((h.rows_processed ?? 0) / (h.total_rows ?? 1) * 100) + '% of ' + (h.total_rows ?? 0).toLocaleString() + ' rows' + (calculateRemaining(h.rows_processed, h.total_rows, h.import_duration) ? ' (remaining: ' + calculateRemaining(h.rows_processed, h.total_rows, h.import_duration) + ')' : '')"></span>
+                                </span>
+                            </template>
+                            <template x-if="h.status === 'completed'">
+                                <span class="progress-cell" x-text="(h.total_rows ?? 0).toLocaleString() + ' rows in ' + formatDuration(h.import_duration)"></span>
+                            </template>
+                            <span x-show="h.status === 'idle' || h.status === 'failed'" class="progress-cell">-</span>
+                        </td>
                         <td x-text="h.error_message ?? '-'"></td>
                     </tr>
                 </template>
