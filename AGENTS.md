@@ -24,8 +24,11 @@ docker compose up -d
 # Build multi-architecture images
 ./build_multi.sh
 
-# Trigger import via API
+# Trigger full import
 curl -X POST http://localhost:8080/api/import/trigger
+
+# Trigger test import (limited rows per file)
+curl -X POST "http://localhost:8080/api/import/trigger?limit=1000"
 ```
 
 ## Key Files
@@ -39,8 +42,8 @@ curl -X POST http://localhost:8080/api/import/trigger
 | `nginx.conf` | Nginx reverse proxy configuration |
 | `www/index.html` | Web search interface |
 | `www/admin.html` | Admin interface for triggering imports |
-| `sql/notes_ddl.sql` | Database schema definition |
-| `sql/pg_stat_progress_copy.sql` | Query for monitoring data loading progress |
+| `cmd/api/main.go` | Go API server (import logic) |
+| `cmd/api/migrations/` | Database migrations |
 
 ## Architecture
 
@@ -60,7 +63,9 @@ curl -X POST http://localhost:8080/api/import/trigger
 
 - Data is persisted in Docker volume `x-notes-db`
 - Full-text search uses `summary_ts` column with PostgREST `wfts.` operator
-- Loader fetches from `https://ton.twimg.com/birdwatch-public-data/%Y/%m/%d/notes/notes-00000.zip`
+- Loader fetches from `https://ton.twimg.com/birdwatch-public-data/%Y/%m/%d/notes/` and discovers all available notes-XXXXX.zip files
+- Multi-file support: downloads and imports all available files sequentially
+- Test mode: use `?limit=N` to limit rows per file during import
 
 ## Other Useful URLs
 

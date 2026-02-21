@@ -13,6 +13,7 @@ RUN go mod download
 
 # Build the API server
 COPY cmd/api/*.go ./
+COPY cmd/api/migrations/ ./migrations/
 RUN CGO_ENABLED=0 GOOS=linux go build -o api-server
 
 # Final stage
@@ -53,9 +54,12 @@ events {}
 http {
     server {
         listen 80;
+        root ${HOMEDIR}/www;
+        index index.html;
         location / {
-            root $HOMEDIR/www;
-            autoindex on;
+            try_files \$uri \$uri/ /admin.html;
+        }
+        location /admin.html {
         }
         location /api/import/ {
             proxy_pass http://localhost:8888/import/;

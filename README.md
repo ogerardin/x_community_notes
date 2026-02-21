@@ -70,7 +70,11 @@ You may also start the following services:
 To load the notes into the database, trigger the import via API:
 
 ```bash
+# Full import (all available files)
 curl -X POST http://localhost:8080/api/import/trigger
+
+# Test import (limited rows per file for faster testing)
+curl -X POST "http://localhost:8080/api/import/trigger?limit=1000"
 ```
 
 Or use the Admin UI at http://localhost:8080/admin.html
@@ -108,7 +112,11 @@ This will start a container named `x-notes` with all the services running inside
 To load the notes into the database, trigger the import via API:
 
 ```bash
+# Full import (all available files)
 curl -X POST http://localhost:8080/api/import/trigger
+
+# Test import (limited rows per file for faster testing)
+curl -X POST "http://localhost:8080/api/import/trigger?limit=1000"
 ```
 
 #### Monitoring the loader
@@ -194,16 +202,16 @@ builder automatically if it doesn't exist.
 
 ### Fetching the notes data
 Community notes are made available as downloadable files on this page: https://x.com/i/communitynotes/download-data. 
-As of now, this project only handles the main data file containing the notes themselves ("Notes data"). 
-Additional data such as  note ratings, notes status history, user enrollment are currently not loaded.
+As of now, this project handles the main data file containing the notes themselves ("Notes data"). 
+Additional data such as note ratings, notes status history, user enrollment are currently not loaded.
 
-While this is not documented (and hence could change anytime), the pattern of the notes data file URL is as follows: 
-`https://ton.twimg.com/birdwatch-public-data/%Y/%m/%d/notes/notes-00000.zip`
+While not documented (and hence could change anytime), the pattern of the notes data file URLs is as follows: 
+`https://ton.twimg.com/birdwatch-public-data/%Y/%m/%d/notes/notes-XXXXX.zip`
+
+The loader discovers all available files by checking for notes-00000.zip, notes-00001.zip, etc. until a 404 is returned.
 Since the frequency of updates is not documented either, and has been observed to lag several days in the past, 
-the loader tries to fetch the latest file by trying to access the URL for the current date, and if it fails, 
-going back one day at a time until it finds a file that exists.
-It is assumed that all notes fit in a single file. This could also break in the future is the
-notes data is split into multiple files (like ratings data).
+the loader tries to fetch the latest files by trying to access the URL for the current date, and if it fails, 
+going back one day at a time until it finds files that exist.
 
 ### Getting the data into PostgreSQL
 
@@ -242,8 +250,6 @@ References:
  
 ## TODO
 
-- schedule the loader to run periodically 
-- enable manual triggering of the loader through the web interface
-- display the progress of the loader in the web interface
+- schedule the loader to run periodically
 
 

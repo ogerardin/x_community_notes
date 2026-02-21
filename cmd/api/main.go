@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -52,6 +55,9 @@ type ImportStatus struct {
 	FileName           *string    `json:"file_name,omitempty"`
 	FileSize           *int64     `json:"file_size,omitempty"`
 	ImportDuration     *int       `json:"import_duration,omitempty"`
+	TotalFiles         *int       `json:"total_files,omitempty"`
+	CurrentFileIndex   *int       `json:"current_file_index,omitempty"`
+	FilesProcessed     *int       `json:"files_processed,omitempty"`
 }
 
 func initDBWithRetry(maxRetries int, delay time.Duration) error {
@@ -121,12 +127,16 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 	var fileName sql.NullString
 	var fileSize sql.NullInt64
 	var importDuration sql.NullInt64
+	var totalFiles sql.NullInt64
+	var currentFileIndex sql.NullInt64
+	var filesProcessed sql.NullInt64
 
 	err := db.QueryRowContext(ctx, `
 		SELECT status, COALESCE(total_rows, 0), started_at, completed_at, error_message, 
-		       COALESCE(download_percentage, 0), download_speed, file_name, file_size, import_duration
+		       COALESCE(download_percentage, 0), download_speed, file_name, file_size, import_duration,
+		       COALESCE(total_files, 0), COALESCE(current_file_index, 0), COALESCE(files_processed, 0)
 		FROM import_history WHERE job_id = $1
-	`, *currentJobID).Scan(&status.Status, &totalRows, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &fileName, &fileSize, &importDuration)
+	`, *currentJobID).Scan(&status.Status, &totalRows, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &fileName, &fileSize, &importDuration, &totalFiles, &currentFileIndex, &filesProcessed)
 
 	if err != nil {
 		http.Error(w, "Failed to get import status: "+err.Error(), http.StatusInternalServerError)
@@ -160,6 +170,18 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 		id := int(importDuration.Int64)
 		status.ImportDuration = &id
 	}
+	if totalFiles.Valid {
+		tf := int(totalFiles.Int64)
+		status.TotalFiles = &tf
+	}
+	if currentFileIndex.Valid {
+		cfi := int(currentFileIndex.Int64)
+		status.CurrentFileIndex = &cfi
+	}
+	if filesProcessed.Valid {
+		fp := int(filesProcessed.Int64)
+		status.FilesProcessed = &fp
+	}
 
 	if status.Status == "importing" {
 		var tuplesProcessed int
@@ -187,7 +209,8 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message, 
-		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_name, file_size
+		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_name, file_size,
+		       total_files, current_file_index, files_processed, file_names
 		FROM import_history 
 		ORDER BY started_at DESC 
 		LIMIT 50
@@ -214,6 +237,10 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 		ImportDuration     *int       `json:"import_duration,omitempty"`
 		FileName           *string    `json:"file_name,omitempty"`
 		FileSize           *int64     `json:"file_size,omitempty"`
+		TotalFiles         *int       `json:"total_files,omitempty"`
+		CurrentFileIndex   *int       `json:"current_file_index,omitempty"`
+		FilesProcessed     *int       `json:"files_processed,omitempty"`
+		FileNames          *string    `json:"file_names,omitempty"`
 	}
 
 	var history []HistoryEntry
@@ -230,8 +257,12 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 		var importDuration sql.NullInt64
 		var fileName sql.NullString
 		var fileSize sql.NullInt64
+		var totalFiles sql.NullInt64
+		var currentFileIndex sql.NullInt64
+		var filesProcessed sql.NullInt64
+		var fileNames sql.NullString
 
-		err := rows.Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileName, &fileSize)
+		err := rows.Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileName, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames)
 		if err != nil {
 			continue
 		}
@@ -274,6 +305,21 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 		if fileSize.Valid {
 			h.FileSize = &fileSize.Int64
 		}
+		if totalFiles.Valid {
+			tf := int(totalFiles.Int64)
+			h.TotalFiles = &tf
+		}
+		if currentFileIndex.Valid {
+			cfi := int(currentFileIndex.Int64)
+			h.CurrentFileIndex = &cfi
+		}
+		if filesProcessed.Valid {
+			fp := int(filesProcessed.Int64)
+			h.FilesProcessed = &fp
+		}
+		if fileNames.Valid {
+			h.FileNames = &fileNames.String
+		}
 
 		history = append(history, h)
 	}
@@ -300,16 +346,52 @@ func formatFileDate(date string) string {
 	return date + "-notes-00000"
 }
 
+func formatFileName(index int) string {
+	return fmt.Sprintf("notes-%05d", index)
+}
+
+type FileInfo struct {
+	ZipPath  string
+	TSVPath  string
+	FileName string
+	FileSize int64
+}
+
+func discoverFileCount(ctx context.Context, date string) int {
+	baseURL := fmt.Sprintf("https://ton.twimg.com/birdwatch-public-data/%s/notes/", formatDownloadDate(date))
+
+	for i := 0; i < 100; i++ {
+		url := baseURL + fmt.Sprintf("notes-%05d.zip", i)
+		req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+		if err != nil {
+			return i
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return i
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return i
+		}
+	}
+	return 100
+}
+
 type progressTracker struct {
-	reader     io.Reader
-	totalBytes int64
-	bytesRead  int64
-	lastUpdate time.Time
-	lastPct    int
-	startTime  time.Time
-	ctx        context.Context
-	jobID      string
-	fileName   string
+	reader           io.Reader
+	totalBytes       int64
+	bytesRead        int64
+	lastUpdate       time.Time
+	lastPct          int
+	startTime        time.Time
+	ctx              context.Context
+	jobID            string
+	fileName         string
+	totalFiles       int
+	currentFileIndex int
 }
 
 func (pt *progressTracker) Read(p []byte) (int, error) {
@@ -334,8 +416,8 @@ func (pt *progressTracker) Read(p []byte) (int, error) {
 		}
 
 		db.ExecContext(pt.ctx,
-			`UPDATE import_history SET download_percentage = $1, download_speed = $2, download_duration = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER, file_name = $3, file_size = $4 WHERE job_id = $5`,
-			currentPct, speedStr, pt.fileName, pt.totalBytes, pt.jobID)
+			`UPDATE import_history SET download_percentage = $1, download_speed = $2, download_duration = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER, file_name = $3, file_size = $4, total_files = $5, current_file_index = $6 WHERE job_id = $7`,
+			currentPct, speedStr, pt.fileName, pt.totalBytes, pt.totalFiles, pt.currentFileIndex, pt.jobID)
 	}
 
 	return n, err
@@ -360,74 +442,124 @@ func formatDuration(seconds int64) string {
 	}
 }
 
-func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID string) (string, int64, error) {
+func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID string) ([]FileInfo, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return "", 0, fmt.Errorf("failed to create data directory: %w", err)
+		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
 
+	var date string
 	for i := 0; i < lookbackDays; i++ {
-		date := getDateDaysAgo(i)
-		filename := formatFileDate(date) + ".zip"
-		filepath := filepath.Join(dataDir, filename)
+		date = getDateDaysAgo(i)
 		url := fmt.Sprintf("https://ton.twimg.com/birdwatch-public-data/%s/notes/notes-00000.zip",
 			formatDownloadDate(date))
+
+		resp, err := http.Get(url)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			break
+		}
+	}
+
+	totalFiles := discoverFileCount(ctx, date)
+	if totalFiles == 0 {
+		return nil, fmt.Errorf("no files found for date %s", date)
+	}
+
+	var fileNames []string
+	for i := 0; i < totalFiles; i++ {
+		fileNames = append(fileNames, fmt.Sprintf("%s-notes-%05d.zip", date, i))
+	}
+	fileNamesStr := strings.Join(fileNames, ",")
+
+	db.ExecContext(ctx, `UPDATE import_history SET total_files = $1, current_file_index = 0, file_names = $2 WHERE job_id = $3`, totalFiles, fileNamesStr, jobID)
+
+	var files []FileInfo
+	for i := 0; i < totalFiles; i++ {
+		filename := formatFileName(i) + ".zip"
+		filepath := filepath.Join(dataDir, fmt.Sprintf("%s-%s", date, filename))
+		url := fmt.Sprintf("https://ton.twimg.com/birdwatch-public-data/%s/notes/%s",
+			formatDownloadDate(date), filename)
+
+		var fileSize int64
+		var cached bool
 
 		if _, err := os.Stat(filepath); err == nil {
 			fmt.Printf("File already exists: %s\n", filepath)
 			info, _ := os.Stat(filepath)
-			return filepath, info.Size(), nil
+			fileSize = info.Size()
+			cached = true
+
+			db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_name = $2, file_size = $3, download_cached = $4, download_percentage = 100 WHERE job_id = $5`, i, filename, fileSize, cached, jobID)
+		} else {
+			fmt.Printf("Downloading %s to %s...\n", url, filepath)
+
+			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create request for %s: %w", url, err)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return nil, fmt.Errorf("failed to download %s: %w", url, err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("failed to download %s: status %d", url, resp.StatusCode)
+			}
+
+			totalBytes := resp.ContentLength
+			tracker := &progressTracker{
+				reader:           resp.Body,
+				totalBytes:       totalBytes,
+				startTime:        time.Now(),
+				lastUpdate:       time.Now(),
+				ctx:              ctx,
+				jobID:            jobID,
+				fileName:         filename,
+				totalFiles:       totalFiles,
+				currentFileIndex: i,
+			}
+
+			outFile, err := os.Create(filepath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create file: %w", err)
+			}
+			defer outFile.Close()
+
+			_, err = io.Copy(outFile, tracker)
+			if err != nil {
+				os.Remove(filepath)
+				return nil, fmt.Errorf("failed to write file: %w", err)
+			}
+
+			fileSize = totalBytes
+			fmt.Printf("Downloaded %s\n", filepath)
 		}
 
-		fmt.Printf("Downloading %s to %s...\n", url, filepath)
+		db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_name = $2, file_size = $3, download_cached = $4 WHERE job_id = $5`, i, filename, fileSize, cached, jobID)
 
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		tsvPath, err := extractTSV(filepath, i)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to extract %s: %w", filepath, err)
 		}
 
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			fmt.Printf("Failed to download %s: %v\n", url, err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			fmt.Printf("Failed to download %s: status %d\n", url, resp.StatusCode)
-			continue
-		}
-
-		totalBytes := resp.ContentLength
-		tracker := &progressTracker{
-			reader:     resp.Body,
-			totalBytes: totalBytes,
-			startTime:  time.Now(),
-			lastUpdate: time.Now(),
-			ctx:        ctx,
-			jobID:      jobID,
-			fileName:   filename,
-		}
-
-		outFile, err := os.Create(filepath)
-		if err != nil {
-			return "", 0, fmt.Errorf("failed to create file: %w", err)
-		}
-		defer outFile.Close()
-
-		_, err = io.Copy(outFile, tracker)
-		if err != nil {
-			os.Remove(filepath)
-			return "", 0, fmt.Errorf("failed to write file: %w", err)
-		}
-
-		fmt.Printf("Downloaded %s\n", filepath)
-		return filepath, totalBytes, nil
+		files = append(files, FileInfo{
+			ZipPath:  filepath,
+			TSVPath:  tsvPath,
+			FileName: filename,
+			FileSize: fileSize,
+		})
 	}
 
-	return "", 0, fmt.Errorf("failed to download notes file for last %d days", lookbackDays)
+	return files, nil
 }
 
-func extractTSV(zipPath string) (string, error) {
+func extractTSV(zipPath string, fileIndex int) (string, error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open zip: %w", err)
@@ -435,9 +567,10 @@ func extractTSV(zipPath string) (string, error) {
 	defer reader.Close()
 
 	tsvPath := zipPath[:len(zipPath)-4] + ".tsv"
+	expectedTSV := fmt.Sprintf("notes-%05d.tsv", fileIndex)
 
 	for _, file := range reader.File {
-		if file.Name == "notes-00000.tsv" {
+		if file.Name == expectedTSV {
 			outFile, err := os.Create(tsvPath)
 			if err != nil {
 				return "", fmt.Errorf("failed to create tsv: %w", err)
@@ -460,7 +593,7 @@ func extractTSV(zipPath string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("notes-00000.tsv not found in zip")
+	return "", fmt.Errorf("%s not found in zip", expectedTSV)
 }
 
 func countTSVRows(tsvPath string) (int, error) {
@@ -486,6 +619,41 @@ func countTSVRows(tsvPath string) (int, error) {
 		}
 	}
 	return count - 1, nil
+}
+
+func truncateTSV(tsvPath string, maxLines int) error {
+	if maxLines <= 0 {
+		return nil
+	}
+
+	file, err := os.Open(tsvPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	tmpPath := tsvPath + ".tmp"
+	outFile, err := os.Create(tmpPath)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
+
+	reader := bufio.NewReader(file)
+	for i := 0; i < maxLines; i++ {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if len(line) > 0 {
+				outFile.Write(line)
+			}
+			break
+		}
+		outFile.Write(line)
+	}
+
+	outFile.Close()
+	os.Rename(tmpPath, tsvPath)
+	return nil
 }
 
 func importTSV(ctx context.Context, tsvPath string) error {
@@ -532,6 +700,13 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 
+	limit := 0
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
 	var jobID string
 	err := db.QueryRowContext(ctx, `
 		INSERT INTO import_history (started_at, status, download_percentage, rows_processed)
@@ -545,32 +720,47 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 
 	currentJobID = &jobID
 
-	go func() {
+	go func(limit int) {
 		ctx := context.Background()
 
-		zipPath, fileSize, err := downloadNotesWithProgress(ctx, 7, jobID)
+		files, err := downloadNotesWithProgress(ctx, 7, jobID)
 		if err != nil {
 			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1 WHERE job_id = $2`, err.Error(), jobID)
 			currentJobID = nil
 			return
 		}
 
-		fileName := filepath.Base(zipPath)
+		if limit > 0 {
+			for _, f := range files {
+				fmt.Printf("Truncating %s to %d lines\n", f.TSVPath, limit)
+				if err := truncateTSV(f.TSVPath, limit); err != nil {
+					fmt.Printf("Warning: failed to truncate %s: %v\n", f.TSVPath, err)
+				}
+			}
+		}
 
-		tsvPath, err := extractTSV(zipPath)
+		totalFiles := len(files)
+		var totalRows int
+		var totalSize int64
+
+		for _, f := range files {
+			totalSize += f.FileSize
+		}
+
+		var fileNames []string
+		for _, f := range files {
+			fileNames = append(fileNames, f.FileName)
+		}
+		fileNamesStr := strings.Join(fileNames, ",")
+
+		db.ExecContext(ctx, `UPDATE import_history SET status = 'importing', download_percentage = 100, total_rows = 0, file_name = $1, file_size = $2, import_started_at = NOW(), files_processed = 0, file_names = $3 WHERE job_id = $4`, fmt.Sprintf("%d files", totalFiles), totalSize, fileNamesStr, jobID)
+
+		_, err = db.ExecContext(ctx, `TRUNCATE note`)
 		if err != nil {
-			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1 WHERE job_id = $2`, err.Error(), jobID)
+			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1 WHERE job_id = $2`, "failed to truncate table: "+err.Error(), jobID)
 			currentJobID = nil
 			return
 		}
-
-		totalRows, err := countTSVRows(tsvPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to count rows: %v\n", err)
-			totalRows = 0
-		}
-
-		db.ExecContext(ctx, `UPDATE import_history SET status = 'importing', download_percentage = 100, total_rows = $1, file_name = $2, file_size = $3, import_started_at = NOW() WHERE job_id = $4`, totalRows, fileName, fileSize, jobID)
 
 		done := make(chan struct{})
 		go func() {
@@ -588,28 +778,43 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 
-		err = importTSV(ctx, tsvPath)
+		for i, f := range files {
+			db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_name = $2 WHERE job_id = $3`, i, f.FileName, jobID)
+
+			_, err = db.ExecContext(ctx, fmt.Sprintf(`COPY note FROM '%s' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)`, f.TSVPath))
+			if err != nil {
+				close(done)
+				db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, "failed to import "+f.FileName+": "+err.Error(), jobID)
+				currentJobID = nil
+				return
+			}
+
+			var count int
+			err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM note`).Scan(&count)
+			if err == nil {
+				totalRows = count
+			}
+
+			db.ExecContext(ctx, `UPDATE import_history SET files_processed = $1, total_rows = $2 WHERE job_id = $3`, i+1, totalRows, jobID)
+			fmt.Printf("Imported %s (%d of %d)\n", f.FileName, i+1, totalFiles)
+		}
+
 		close(done)
+
+		var importDuration int
+		err = db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM (NOW() - import_started_at))::INTEGER FROM import_history WHERE job_id = $1`, jobID).Scan(&importDuration)
 		if err != nil {
-			db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, err.Error(), jobID)
-			currentJobID = nil
-			return
+			importDuration = 0
 		}
 
-		var count int
-		err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM note`).Scan(&count)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to count rows: %v\n", err)
-		}
-
-		_, err = db.ExecContext(ctx, `UPDATE import_history SET status = 'completed', total_rows = $1, completed_at = NOW() WHERE job_id = $2`, count, jobID)
+		_, err = db.ExecContext(ctx, `UPDATE import_history SET status = 'completed', total_rows = $1, completed_at = NOW(), import_duration = $2 WHERE job_id = $3`, totalRows, importDuration, jobID)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to update status: %v\n", err)
 		}
 
 		currentJobID = nil
-		fmt.Printf("Imported %d rows\n", count)
-	}()
+		fmt.Printf("Import completed: %d rows from %d files\n", totalRows, totalFiles)
+	}(limit)
 
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Import started"})

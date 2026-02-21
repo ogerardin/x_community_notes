@@ -118,13 +118,13 @@
         importPollInterval: null,
         importHistory: [],
         formatDuration(seconds) {
-            if (!seconds) return '';
+            if (seconds === null || seconds === undefined) return '';
             const m = Math.floor(seconds / 60);
             const s = seconds % 60;
             return m > 0 ? (s > 0 ? m + 'm ' + s + 's' : m + 'm') : s + 's';
         },
         formatFileSize(bytes) {
-            if (!bytes) return '';
+            if (bytes === null || bytes === undefined) return '';
             if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
             if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
             return Math.round(bytes / 1e3) + ' KB';
@@ -160,6 +160,7 @@
                 let resp = await fetch('/api/import/status');
                 if (!resp.ok) throw new Error('Failed to fetch import status');
                 this.importStatus = await resp.json();
+                this.fetchImportHistory();
                 if (this.importStatus.status === 'importing' || this.importStatus.status === 'downloading') {
                     this.startPolling();
                 } else {
@@ -198,7 +199,6 @@
             this.importPollInterval = setInterval(() => {
                 this.fetchImportStatus();
                 this.refreshNoteStats();
-                this.fetchImportHistory();
             }, 1000);
         },
         stopPolling() {
@@ -233,53 +233,64 @@
 
     <div class="history-section">
         <h2 style="font-size: 1.2em; margin-bottom: 0.5em;">Import History</h2>
-        <table class="history-table" x-show="importHistory.length > 0">
+        <table class="history-table">
             <thead>
                 <tr>
                     <th>Started</th>
                     <th>Completed</th>
-                    <th>File</th>
+                    <th>Files</th>
                     <th>Status</th>
                     <th>Download progress</th>
                     <th>Import progress</th>
                     <th>Error</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody x-show="importHistory.length > 0">
                 <template x-for="h in importHistory" :key="h.id">
                     <tr>
                         <td x-text="new Date(h.started_at).toLocaleString()"></td>
                         <td x-text="h.status === 'completed' && h.completed_at ? new Date(h.completed_at).toLocaleString() : '-'"></td>
-                        <td x-text="h.file_name ?? '-'"></td>
+                        <td>
+                            <template x-if="h.file_names">
+                                <div style="display: flex; flex-direction: column;">
+                                    <template x-for="f in h.file_names.split(',')" :key="f">
+                                        <span x-text="f"></span>
+                                    </template>
+                                </div>
+                            </template>
+                            <span x-show="!h.file_names" x-text="h.file_name ?? '-'"></span>
+                        </td>
                         <td>
                             <span :class="'status-' + h.status" x-text="h.status"></span>
                         </td>
                         <td>
                             <template x-if="h.status === 'downloading'">
-                                <span class="progress-cell active" x-text="(h.download_percentage ?? 0) + '% of ' + formatFileSize(h.file_size) + ' (remaining: ' + calculateDownloadRemaining(Math.round((h.download_percentage ?? 0) / 100 * h.file_size), h.file_size, h.download_duration) + ')'"></span>
+                                <span class="progress-cell active" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ' - ' + (h.download_percentage ?? 0) + '% ' + (h.download_speed ?? '')"></span>
                             </template>
                             <template x-if="h.status !== 'downloading' && h.download_cached">
                                 <span class="progress-cell">(cached)</span>
                             </template>
-                            <span x-show="h.status !== 'downloading' && !h.download_cached" class="progress-cell" x-text="h.file_size ? formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) : (h.download_duration ? 'done in ' + formatDuration(h.download_duration) : 'done')"></span>
+                            <span x-show="h.status !== 'downloading' && !h.download_cached" class="progress-cell" x-text="h.total_files ? ((h.files_processed ?? h.total_files) + '/' + h.total_files + ', ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) + ' ' + (h.download_speed ?? '')) : (h.file_size ? formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) + ' ' + (h.download_speed ?? '') : (h.download_duration ? 'done in ' + formatDuration(h.download_duration) + ' ' + (h.download_speed ?? '') : 'done'))"></span>
                         </td>
                         <td>
                             <template x-if="h.status === 'importing'">
-                                <span class="progress-cell active">
-                                    <span x-text="Math.round((h.rows_processed ?? 0) / (h.total_rows ?? 1) * 100) + '% of ' + (h.total_rows ?? 0).toLocaleString() + ' rows' + (calculateRemaining(h.rows_processed, h.total_rows, h.import_duration) ? ' (remaining: ' + calculateRemaining(h.rows_processed, h.total_rows, h.import_duration) + ')' : '')"></span>
-                                </span>
+                                <span class="progress-cell active" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ': ' + (h.file_name ?? '...')"></span>
                             </template>
                             <template x-if="h.status === 'completed'">
                                 <span class="progress-cell" x-text="(h.total_rows ?? 0).toLocaleString() + ' rows in ' + formatDuration(h.import_duration)"></span>
                             </template>
-                            <span x-show="h.status === 'idle' || h.status === 'failed'" class="progress-cell">-</span>
+                            <span x-show="h.status === 'idle' || h.status === 'failed' || h.status === 'downloading'" class="progress-cell">-</span>
                         </td>
                         <td x-text="h.error_message ?? '-'"></td>
                     </tr>
                 </template>
             </tbody>
+            <tbody x-show="importHistory.length === 0">
+                <tr>
+                    <td colspan="7" style="color: #666; text-align: center;">No import history</td>
+                </tr>
+            </tbody>
         </table>
-        <div x-show="importHistory.length === 0" style="color: #666; margin-top: 0.5em;">No import history</div>
     </div>
 
 </div>
