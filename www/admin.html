@@ -157,7 +157,7 @@
         },
         async fetchImportStatus() {
             try {
-                let resp = await fetch('/api/import/status');
+                let resp = await fetch('/api/imports/current');
                 if (!resp.ok) throw new Error('Failed to fetch import status');
                 this.importStatus = await resp.json();
                 this.fetchImportHistory();
@@ -172,7 +172,7 @@
         },
         async fetchImportHistory() {
             try {
-                let resp = await fetch('/api/import/history');
+                let resp = await fetch('/api/imports');
                 if (!resp.ok) throw new Error('Failed to fetch import history');
                 this.importHistory = await resp.json() || [];
             } catch (e) {
@@ -182,7 +182,7 @@
         async triggerImport() {
             try {
                 this.importError = '';
-                let resp = await fetch('/api/import/trigger', { method: 'POST' });
+                let resp = await fetch('/api/imports', { method: 'POST' });
                 if (resp.status === 409) {
                     this.importError = 'Import already in progress';
                     return;

@@ -18,9 +18,14 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/lib/pq"
+
+	"embed"
 )
+
+//go:embed migrations
+var migrationsFS embed.FS
 
 var logger *slog.Logger
 
@@ -89,6 +94,28 @@ var (
 var db *sql.DB
 var currentJobID *string
 
+type HistoryEntry struct {
+	ID                 int        `json:"id"`
+	JobID              string     `json:"job_id"`
+	StartedAt          time.Time  `json:"started_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	TotalRows          *int       `json:"total_rows,omitempty"`
+	Status             string     `json:"status"`
+	ErrorMessage       *string    `json:"error_message,omitempty"`
+	DownloadPercentage *int       `json:"download_percentage,omitempty"`
+	DownloadSpeed      *string    `json:"download_speed,omitempty"`
+	RowsProcessed      *int       `json:"rows_processed,omitempty"`
+	DownloadCached     *bool      `json:"download_cached,omitempty"`
+	DownloadDuration   *int       `json:"download_duration,omitempty"`
+	ImportDuration     *int       `json:"import_duration,omitempty"`
+	FileName           *string    `json:"file_name,omitempty"`
+	FileSize           *int64     `json:"file_size,omitempty"`
+	TotalFiles         *int       `json:"total_files,omitempty"`
+	CurrentFileIndex   *int       `json:"current_file_index,omitempty"`
+	FilesProcessed     *int       `json:"files_processed,omitempty"`
+	FileNames          *string    `json:"file_names,omitempty"`
+}
+
 type ImportStatus struct {
 	Status             string     `json:"status"`
 	TotalRows          *int       `json:"total_rows"`
@@ -140,8 +167,14 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("failed to create driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		"file:///migrations",
+	d, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create iofs driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance(
+		"iofs",
+		d,
 		"postgres",
 		driver,
 	)
@@ -157,12 +190,30 @@ func runMigrations(db *sql.DB) error {
 	return nil
 }
 
-func getImportStatus(w http.ResponseWriter, r *http.Request) {
+type Problem struct {
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail,omitempty"`
+}
+
+func writeProblem(w http.ResponseWriter, status int, title, detail string) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(Problem{
+		Type:   fmt.Sprintf("https://httpstatuses.com/%d", status),
+		Title:  title,
+		Status: status,
+		Detail: detail,
+	})
+}
+
+func getCurrentImport(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	if currentJobID == nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ImportStatus{Status: "idle"})
+		json.NewEncoder(w).Encode(ImportStatus{})
 		return
 	}
 
@@ -187,7 +238,7 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 	`, *currentJobID).Scan(&status.Status, &totalRows, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &fileName, &fileSize, &importDuration, &totalFiles, &currentFileIndex, &filesProcessed)
 
 	if err != nil {
-		http.Error(w, "Failed to get import status: "+err.Error(), http.StatusInternalServerError)
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to get import status: "+err.Error())
 		return
 	}
 
@@ -225,7 +276,7 @@ func getImportStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
-func getImportHistory(w http.ResponseWriter, r *http.Request) {
+func listImports(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	rows, err := db.QueryContext(ctx, `
@@ -237,32 +288,10 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 		LIMIT 50
 	`)
 	if err != nil {
-		http.Error(w, "Failed to get import history: "+err.Error(), http.StatusInternalServerError)
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to get import history: "+err.Error())
 		return
 	}
 	defer rows.Close()
-
-	type HistoryEntry struct {
-		ID                 int        `json:"id"`
-		JobID              string     `json:"job_id"`
-		StartedAt          time.Time  `json:"started_at"`
-		CompletedAt        *time.Time `json:"completed_at,omitempty"`
-		TotalRows          *int       `json:"total_rows,omitempty"`
-		Status             string     `json:"status"`
-		ErrorMessage       *string    `json:"error_message,omitempty"`
-		DownloadPercentage *int       `json:"download_percentage,omitempty"`
-		DownloadSpeed      *string    `json:"download_speed,omitempty"`
-		RowsProcessed      *int       `json:"rows_processed,omitempty"`
-		DownloadCached     *bool      `json:"download_cached,omitempty"`
-		DownloadDuration   *int       `json:"download_duration,omitempty"`
-		ImportDuration     *int       `json:"import_duration,omitempty"`
-		FileName           *string    `json:"file_name,omitempty"`
-		FileSize           *int64     `json:"file_size,omitempty"`
-		TotalFiles         *int       `json:"total_files,omitempty"`
-		CurrentFileIndex   *int       `json:"current_file_index,omitempty"`
-		FilesProcessed     *int       `json:"files_processed,omitempty"`
-		FileNames          *string    `json:"file_names,omitempty"`
-	}
 
 	var history []HistoryEntry
 	for rows.Next() {
@@ -309,6 +338,69 @@ func getImportHistory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(history)
+}
+
+func getImportByID(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+	jobID := r.PathValue("job_id")
+
+	if jobID == "" {
+		writeProblem(w, http.StatusBadRequest, "Bad Request", "Job ID is required")
+		return
+	}
+
+	var h HistoryEntry
+	var completedAt sql.NullTime
+	var totalRows sql.NullInt64
+	var errorMessage sql.NullString
+	var downloadPct sql.NullInt64
+	var downloadSpeed sql.NullString
+	var rowsProcessed sql.NullInt64
+	var downloadCached sql.NullBool
+	var downloadDuration sql.NullInt64
+	var importDuration sql.NullInt64
+	var fileName sql.NullString
+	var fileSize sql.NullInt64
+	var totalFiles sql.NullInt64
+	var currentFileIndex sql.NullInt64
+	var filesProcessed sql.NullInt64
+	var fileNames sql.NullString
+
+	err := db.QueryRowContext(ctx, `
+		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message, 
+		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_name, file_size,
+		       total_files, current_file_index, files_processed, file_names
+		FROM import_history 
+		WHERE job_id = $1
+	`, jobID).Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileName, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames)
+
+	if err == sql.ErrNoRows {
+		writeProblem(w, http.StatusNotFound, "Not Found", "Import job not found")
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to get import: "+err.Error())
+		return
+	}
+
+	h.CompletedAt = nullTimeToTimePtr(completedAt)
+	h.TotalRows = nullInt64ToIntPtr(totalRows)
+	h.ErrorMessage = nullStringToStrPtr(errorMessage)
+	h.DownloadPercentage = nullInt64ToIntPtr(downloadPct)
+	h.DownloadSpeed = nullStringToStrPtr(downloadSpeed)
+	h.RowsProcessed = nullInt64ToIntPtr(rowsProcessed)
+	h.DownloadCached = nullBoolToBoolPtr(downloadCached)
+	h.DownloadDuration = nullInt64ToIntPtr(downloadDuration)
+	h.ImportDuration = nullInt64ToIntPtr(importDuration)
+	h.FileName = nullStringToStrPtr(fileName)
+	h.FileSize = nullInt64ToInt64Ptr(fileSize)
+	h.TotalFiles = nullInt64ToIntPtr(totalFiles)
+	h.CurrentFileIndex = nullInt64ToIntPtr(currentFileIndex)
+	h.FilesProcessed = nullInt64ToIntPtr(filesProcessed)
+	h.FileNames = nullStringToStrPtr(fileNames)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(h)
 }
 
 func getDateDaysAgo(n int) string {
@@ -639,14 +731,14 @@ func truncateTSV(tsvPath string, maxLines int) error {
 	return nil
 }
 
-func triggerImport(w http.ResponseWriter, r *http.Request) {
+func createImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeProblem(w, http.StatusMethodNotAllowed, "Method Not Allowed", "POST method required")
 		return
 	}
 
 	if currentJobID != nil {
-		http.Error(w, "Import already in progress", http.StatusConflict)
+		writeProblem(w, http.StatusConflict, "Conflict", "Import already in progress")
 		return
 	}
 
@@ -666,11 +758,15 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 		RETURNING job_id
 	`).Scan(&jobID)
 	if err != nil {
-		http.Error(w, "Failed to create import job: "+err.Error(), http.StatusInternalServerError)
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to create import job: "+err.Error())
 		return
 	}
 
 	currentJobID = &jobID
+
+	w.Header().Set("Location", "/imports/"+jobID)
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Import started", "job_id": jobID})
 
 	go func(limit int) {
 		ctx := context.Background()
@@ -764,9 +860,6 @@ func triggerImport(w http.ResponseWriter, r *http.Request) {
 		currentJobID = nil
 		logger.Info("Import completed", "rows", totalRows, "files", totalFiles)
 	}(limit)
-
-	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Import started"})
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
@@ -805,9 +898,10 @@ func main() {
 	sanitizeImportStatus()
 
 	http.HandleFunc("/health", healthCheck)
-	http.HandleFunc("/import/status", getImportStatus)
-	http.HandleFunc("/import/history", getImportHistory)
-	http.HandleFunc("/import/trigger", triggerImport)
+	http.HandleFunc("GET /imports/current", getCurrentImport)
+	http.HandleFunc("GET /imports", listImports)
+	http.HandleFunc("GET /imports/{job_id}", getImportByID)
+	http.HandleFunc("POST /imports", createImport)
 
 	logger.Info("Starting API server", "port", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {

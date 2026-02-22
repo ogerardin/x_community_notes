@@ -1,9 +1,4 @@
-FROM postgres:17-alpine AS builder
-
-ENV HOMEDIR=/home
-
-# Install Go for building the API server
-RUN apk add --no-cache go
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /src
 
@@ -61,8 +56,11 @@ http {
         }
         location /admin.html {
         }
-        location /api/import/ {
-            proxy_pass http://localhost:8888/import/;
+        location ~ ^/api/imports(/.*)?$ {
+            proxy_pass http://localhost:8888/imports\$1\$is_args\$args;
+        }
+        location /health {
+            proxy_pass http://localhost:8888/health;
         }
         location /api/ {
             proxy_pass http://localhost:3000/;
@@ -75,7 +73,7 @@ EOF
 # Copy the API server binary from builder
 COPY --from=builder /src/api-server /usr/local/bin/
 
-# Import can be triggered via API: curl -X POST http://localhost:8080/api/import/trigger
+# Import can be triggered via API: curl -X POST http://localhost:8080/api/imports
 
 # Data directory for downloaded notes
 VOLUME ["$HOMEDIR/data"]
