@@ -274,7 +274,7 @@
                         </td>
                         <td>
                             <template x-if="h.status === 'importing'">
-                                <span class="progress-cell active" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ': ' + (h.file_name ?? '...')"></span>
+                                <span class="progress-cell active" x-text="(h.current_file_index ?? 0) + 1 + '/' + (h.total_files ?? 0) + ' - ' + (h.rows_processed ?? 0).toLocaleString() + ' / ' + (h.total_rows ? h.total_rows.toLocaleString() : '?') + ' (' + (h.total_rows ? Math.round((h.rows_processed ?? 0) / h.total_rows * 100) : 0) + '%)'"></span>
                             </template>
                             <template x-if="h.status === 'completed'">
                                 <span class="progress-cell" x-text="(h.total_rows ?? 0).toLocaleString() + ' rows in ' + formatDuration(h.import_duration)"></span>
