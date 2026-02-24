@@ -115,6 +115,7 @@
         latestTimestamp: null,
         importStatus: null,
         importError: '',
+        backendOnline: true,
         importPollInterval: null,
         importHistory: [],
         formatDuration(seconds) {
@@ -159,15 +160,19 @@
             try {
                 let resp = await fetch('/api/imports/current');
                 if (!resp.ok) throw new Error('Failed to fetch import status');
-                this.importStatus = await resp.json();
+                let data = await resp.json();
+                this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
+                this.importError = '';
+                this.backendOnline = true;
                 this.fetchImportHistory();
-                if (this.importStatus.status === 'importing' || this.importStatus.status === 'downloading') {
+                if (this.importStatus?.status === 'importing' || this.importStatus?.status === 'downloading') {
                     this.startPolling();
                 } else {
                     this.stopPolling();
                 }
             } catch (e) {
-                this.importError = e.message;
+                this.backendOnline = false;
+                this.importError = '';
             }
         },
         async fetchImportHistory() {
@@ -182,14 +187,25 @@
         async triggerImport() {
             try {
                 this.importError = '';
-                let resp = await fetch('/api/imports', { method: 'POST' });
-                if (resp.status === 409) {
+                if (this.importStatus?.status === 'importing' || this.importStatus?.status === 'downloading') {
                     this.importError = 'Import already in progress';
                     return;
                 }
-                if (!resp.ok) throw new Error('Failed to trigger import');
-                this.fetchImportStatus();
-                this.fetchImportHistory();
+                let resp = await fetch('/api/imports/create', { method: 'POST' });
+                if (!resp.ok) throw new Error('Failed to trigger import: ' + resp.status);
+                await this.fetchImportStatus();
+                await this.fetchImportHistory();
+            } catch (e) {
+                this.importError = e.message;
+            }
+        },
+        async abortImport() {
+            try {
+                if (!this.importStatus?.job_id) return;
+                let resp = await fetch('/api/imports/' + this.importStatus.job_id, { method: 'DELETE' });
+                if (!resp.ok) throw new Error('Failed to abort import');
+                await this.fetchImportStatus();
+                await this.fetchImportHistory();
             } catch (e) {
                 this.importError = e.message;
             }
@@ -198,8 +214,9 @@
             if (this.importPollInterval) return;
             this.importPollInterval = setInterval(() => {
                 this.fetchImportStatus();
+                this.fetchImportHistory();
                 this.refreshNoteStats();
-            }, 1000);
+            }, 2000);
         },
         stopPolling() {
             if (this.importPollInterval) {
@@ -211,9 +228,14 @@
             this.fetchImportStatus();
             this.refreshNoteStats();
             this.fetchImportHistory();
+            setInterval(() => this.fetchImportStatus(), 5000);
         },
 
     }">
+
+    <div x-show="!backendOnline" style="background: #dc3545; color: white; padding: 0.5em 1em; margin-bottom: 1em; border-radius: 4px;">
+        Backend unavailable
+    </div>
 
     <div class="info-row">
         <span x-text="noteCount.toLocaleString() + ' notes, latest: ' + (latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A')"></span>
@@ -221,12 +243,20 @@
     </div>
 
     <div class="import-bar" style="margin-bottom: 1em;">
-        <button 
-            class="import-btn" 
+        <button
+            class="import-btn"
             @click="triggerImport()"
             x-bind:disabled="importStatus?.status === 'importing' || importStatus?.status === 'downloading'"
         >
             Update Notes
+        </button>
+        <button
+            class="import-btn"
+            style="background: #dc3545; margin-left: 0.5em;"
+            @click="abortImport()"
+            x-show="importStatus?.status === 'importing' || importStatus?.status === 'downloading'"
+        >
+            Abort
         </button>
         <span x-show="importError" class="error" style="margin-left: 1em;" x-text="importError"></span>
     </div>
@@ -258,7 +288,7 @@
                                     </template>
                                 </div>
                             </template>
-                            <span x-show="!h.file_names" x-text="h.file_name ?? '-'"></span>
+                            <span x-show="!h.file_names">-</span>
                         </td>
                         <td>
                             <span :class="'status-' + h.status" x-text="h.status"></span>
@@ -267,10 +297,19 @@
                             <template x-if="h.status === 'downloading'">
                                 <span class="progress-cell active" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ' - ' + (h.download_percentage ?? 0) + '% ' + (h.download_speed ?? '')"></span>
                             </template>
-                            <template x-if="h.status !== 'downloading' && h.download_cached">
-                                <span class="progress-cell">(cached)</span>
+                            <template x-if="h.status === 'importing' && h.download_cached">
+                                <span class="progress-cell" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' (cached)'"></span>
                             </template>
-                            <span x-show="h.status !== 'downloading' && !h.download_cached" class="progress-cell" x-text="h.total_files ? ((h.files_processed ?? h.total_files) + '/' + h.total_files + ', ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) + ' ' + (h.download_speed ?? '')) : (h.file_size ? formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) + ' ' + (h.download_speed ?? '') : (h.download_duration ? 'done in ' + formatDuration(h.download_duration) + ' ' + (h.download_speed ?? '') : 'done'))"></span>
+                            <template x-if="h.status === 'importing' && !h.download_cached">
+                                <span class="progress-cell" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration)"></span>
+                            </template>
+                            <template x-if="h.status === 'completed' && h.download_cached">
+                                <span class="progress-cell" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' (cached)'"></span>
+                            </template>
+                            <template x-if="h.status === 'completed' && !h.download_cached">
+                                <span class="progress-cell" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration)"></span>
+                            </template>
+                            <span x-show="h.status === 'failed'" class="progress-cell">-</span>
                         </td>
                         <td>
                             <template x-if="h.status === 'importing'">

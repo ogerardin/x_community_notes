@@ -28,10 +28,10 @@ func main() {
 	sanitizeImportStatus()
 
 	http.HandleFunc("/health", healthCheck)
-	http.HandleFunc("GET /imports/current", getCurrentImport)
-	http.HandleFunc("GET /imports", listImports)
 	http.HandleFunc("GET /imports/{job_id}", getImportByID)
 	http.HandleFunc("POST /imports", createImport)
+	http.HandleFunc("POST /imports/{job_id}/abort", abortImport)
+	http.HandleFunc("DELETE /imports/{job_id}", abortImport)
 
 	logger.Info("Starting API server", "port", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {

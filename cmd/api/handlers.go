@@ -12,136 +12,13 @@ import (
 	"time"
 )
 
-func getCurrentImport(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-
-	if currentJobID == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ImportStatus{})
-		return
-	}
-
-	var status ImportStatus
-	var totalRows int
-	var startedAt, completedAt sql.NullTime
-	var errorMessage sql.NullString
-	var downloadPct sql.NullInt64
-	var downloadSpeed sql.NullString
-	var fileName sql.NullString
-	var fileSize sql.NullInt64
-	var importDuration sql.NullInt64
-	var totalFiles sql.NullInt64
-	var currentFileIndex sql.NullInt64
-	var filesProcessed sql.NullInt64
-
-	err := db.QueryRowContext(ctx, `
-		SELECT status, COALESCE(total_rows, 0), started_at, completed_at, error_message, 
-		       COALESCE(download_percentage, 0), download_speed, file_name, file_size, import_duration,
-		       COALESCE(total_files, 0), COALESCE(current_file_index, 0), COALESCE(files_processed, 0)
-		FROM import_history WHERE job_id = $1
-	`, *currentJobID).Scan(&status.Status, &totalRows, &startedAt, &completedAt, &errorMessage, &downloadPct, &downloadSpeed, &fileName, &fileSize, &importDuration, &totalFiles, &currentFileIndex, &filesProcessed)
-
+func isImportAborted(jobID string) bool {
+	var status string
+	err := db.QueryRowContext(context.Background(), `SELECT status FROM import_history WHERE job_id = $1`, jobID).Scan(&status)
 	if err != nil {
-		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to get import status: "+err.Error())
-		return
+		return false
 	}
-
-	status.TotalRows = &totalRows
-	status.StartedAt = nullTimeToTimePtr(startedAt)
-	status.CompletedAt = nullTimeToTimePtr(completedAt)
-	status.ErrorMessage = nullStringToStrPtr(errorMessage)
-	status.DownloadPercentage = nullInt64ToIntPtr(downloadPct)
-	status.DownloadSpeed = nullStringToStrPtr(downloadSpeed)
-	status.FileName = nullStringToStrPtr(fileName)
-	status.FileSize = nullInt64ToInt64Ptr(fileSize)
-	status.ImportDuration = nullInt64ToIntPtr(importDuration)
-	status.TotalFiles = nullInt64ToIntPtr(totalFiles)
-	status.CurrentFileIndex = nullInt64ToIntPtr(currentFileIndex)
-	status.FilesProcessed = nullInt64ToIntPtr(filesProcessed)
-
-	if status.Status == "importing" {
-		var tuplesProcessed int
-		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(tuples_processed, 0)
-			FROM pg_stat_progress_copy
-			LIMIT 1
-		`).Scan(&tuplesProcessed)
-
-		if err == nil {
-			status.RowsProcessed = tuplesProcessed
-			if status.TotalRows != nil && *status.TotalRows > 0 {
-				pct := (tuplesProcessed * 100) / *status.TotalRows
-				status.Percentage = &pct
-			}
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
-}
-
-func listImports(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message, 
-		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_name, file_size,
-		       total_files, current_file_index, files_processed, file_names
-		FROM import_history 
-		ORDER BY started_at DESC 
-		LIMIT 50
-	`)
-	if err != nil {
-		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to get import history: "+err.Error())
-		return
-	}
-	defer rows.Close()
-
-	var history []HistoryEntry
-	for rows.Next() {
-		var h HistoryEntry
-		var completedAt sql.NullTime
-		var totalRows sql.NullInt64
-		var errorMessage sql.NullString
-		var downloadPct sql.NullInt64
-		var downloadSpeed sql.NullString
-		var rowsProcessed sql.NullInt64
-		var downloadCached sql.NullBool
-		var downloadDuration sql.NullInt64
-		var importDuration sql.NullInt64
-		var fileName sql.NullString
-		var fileSize sql.NullInt64
-		var totalFiles sql.NullInt64
-		var currentFileIndex sql.NullInt64
-		var filesProcessed sql.NullInt64
-		var fileNames sql.NullString
-
-		err := rows.Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileName, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames)
-		if err != nil {
-			continue
-		}
-
-		h.CompletedAt = nullTimeToTimePtr(completedAt)
-		h.TotalRows = nullInt64ToIntPtr(totalRows)
-		h.ErrorMessage = nullStringToStrPtr(errorMessage)
-		h.DownloadPercentage = nullInt64ToIntPtr(downloadPct)
-		h.DownloadSpeed = nullStringToStrPtr(downloadSpeed)
-		h.RowsProcessed = nullInt64ToIntPtr(rowsProcessed)
-		h.DownloadCached = nullBoolToBoolPtr(downloadCached)
-		h.DownloadDuration = nullInt64ToIntPtr(downloadDuration)
-		h.ImportDuration = nullInt64ToIntPtr(importDuration)
-		h.FileName = nullStringToStrPtr(fileName)
-		h.FileSize = nullInt64ToInt64Ptr(fileSize)
-		h.TotalFiles = nullInt64ToIntPtr(totalFiles)
-		h.CurrentFileIndex = nullInt64ToIntPtr(currentFileIndex)
-		h.FilesProcessed = nullInt64ToIntPtr(filesProcessed)
-		h.FileNames = nullStringToStrPtr(fileNames)
-
-		history = append(history, h)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+	return status == "failed"
 }
 
 func getImportByID(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +40,6 @@ func getImportByID(w http.ResponseWriter, r *http.Request) {
 	var downloadCached sql.NullBool
 	var downloadDuration sql.NullInt64
 	var importDuration sql.NullInt64
-	var fileName sql.NullString
 	var fileSize sql.NullInt64
 	var totalFiles sql.NullInt64
 	var currentFileIndex sql.NullInt64
@@ -172,11 +48,11 @@ func getImportByID(w http.ResponseWriter, r *http.Request) {
 
 	err := db.QueryRowContext(ctx, `
 		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message, 
-		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_name, file_size,
+		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_size,
 		       total_files, current_file_index, files_processed, file_names
 		FROM import_history 
 		WHERE job_id = $1
-	`, jobID).Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileName, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames)
+	`, jobID).Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames)
 
 	if err == sql.ErrNoRows {
 		writeProblem(w, http.StatusNotFound, "Not Found", "Import job not found")
@@ -196,7 +72,6 @@ func getImportByID(w http.ResponseWriter, r *http.Request) {
 	h.DownloadCached = nullBoolToBoolPtr(downloadCached)
 	h.DownloadDuration = nullInt64ToIntPtr(downloadDuration)
 	h.ImportDuration = nullInt64ToIntPtr(importDuration)
-	h.FileName = nullStringToStrPtr(fileName)
 	h.FileSize = nullInt64ToInt64Ptr(fileSize)
 	h.TotalFiles = nullInt64ToIntPtr(totalFiles)
 	h.CurrentFileIndex = nullInt64ToIntPtr(currentFileIndex)
@@ -207,18 +82,53 @@ func getImportByID(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(h)
 }
 
+func abortImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		writeProblem(w, http.StatusMethodNotAllowed, "Method Not Allowed", "POST or DELETE method required")
+		return
+	}
+
+	ctx := context.Background()
+	jobID := r.PathValue("job_id")
+
+	if jobID == "" {
+		writeProblem(w, http.StatusBadRequest, "Bad Request", "Job ID is required")
+		return
+	}
+
+	result, err := db.ExecContext(ctx, `
+		UPDATE import_history 
+		SET status = 'failed', error_message = 'Aborted by user', completed_at = NOW() 
+		WHERE job_id = $1 AND status IN ('importing', 'downloading')
+	`, jobID)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to abort import: "+err.Error())
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		writeProblem(w, http.StatusNotFound, "Not Found", "No active import job found with that ID")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func createImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeProblem(w, http.StatusMethodNotAllowed, "Method Not Allowed", "POST method required")
 		return
 	}
 
-	if currentJobID != nil {
+	ctx := context.Background()
+
+	var active int
+	db.QueryRowContext(ctx, `SELECT COUNT(*) FROM import_history WHERE status IN ('importing', 'downloading')`).Scan(&active)
+	if active > 0 {
 		writeProblem(w, http.StatusConflict, "Conflict", "Import already in progress")
 		return
 	}
-
-	ctx := context.Background()
 
 	limit := 0
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
@@ -238,8 +148,6 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	currentJobID = &jobID
-
 	w.Header().Set("Location", "/imports/"+jobID)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Import started", "job_id": jobID})
@@ -247,9 +155,19 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 	go func(limit int) {
 		ctx := context.Background()
 
+		if isImportAborted(jobID) {
+			logger.Info("Import aborted before start", "job_id", jobID)
+			return
+		}
+
 		files, err := downloadNotesWithProgress(ctx, 7, jobID)
 		if err != nil {
 			setImportFailed(jobID, err.Error())
+			return
+		}
+
+		if isImportAborted(jobID) {
+			setImportFailed(jobID, "Aborted by user")
 			return
 		}
 
@@ -280,7 +198,12 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 		}
 		fileNamesStr := strings.Join(fileNames, ",")
 
-		db.ExecContext(ctx, `UPDATE import_history SET status = 'importing', download_percentage = 100, total_rows = $1, file_name = $2, file_size = $3, import_started_at = NOW(), files_processed = 0, file_names = $4 WHERE job_id = $5`, expectedTotalRows, fmt.Sprintf("%d files", totalFiles), totalSize, fileNamesStr, jobID)
+		db.ExecContext(ctx, `UPDATE import_history SET status = 'importing', download_percentage = 100, total_rows = $1, file_size = $2, import_started_at = NOW(), files_processed = 0, file_names = $3 WHERE job_id = $4`, expectedTotalRows, totalSize, fileNamesStr, jobID)
+
+		if isImportAborted(jobID) {
+			setImportFailed(jobID, "Aborted by user")
+			return
+		}
 
 		_, err = db.ExecContext(ctx, `TRUNCATE note`)
 		if err != nil {
@@ -312,7 +235,13 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		for i, f := range files {
-			db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_name = $2 WHERE job_id = $3`, i, f.FileName, jobID)
+			if isImportAborted(jobID) {
+				close(done)
+				setImportFailed(jobID, "Aborted by user")
+				return
+			}
+
+			db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1 WHERE job_id = $2`, i, jobID)
 
 			res, err := db.ExecContext(ctx, fmt.Sprintf(`COPY note FROM '%s' WITH (FORMAT csv, DELIMITER E'\t', HEADER true)`, f.TSVPath))
 			if err != nil {
@@ -350,7 +279,6 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 			logger.Warn("Failed to update status", "error", err)
 		}
 
-		currentJobID = nil
 		logger.Info("Import completed", "rows", totalRows, "files", totalFiles)
 	}(limit)
 }

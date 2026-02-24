@@ -53,17 +53,28 @@ http {
         index index.html;
         location / {
             try_files \$uri \$uri/ /admin.html;
+            add_header Cache-Control "no-store";
         }
         location /admin.html {
+            add_header Cache-Control "no-store";
         }
-        location ~ ^/api/imports(/.*)?$ {
-            proxy_pass http://localhost:8888/imports\$1\$is_args\$args;
+        location /api/imports/current {
+            proxy_pass http://127.0.0.1:3000/import_history?order=started_at.desc&limit=1;
+        }
+        location /api/imports/create {
+            proxy_pass http://127.0.0.1:8888/imports;
+        }
+        location /api/imports/ {
+            proxy_pass http://127.0.0.1:8888/imports/;
+        }
+        location /api/imports {
+            proxy_pass http://127.0.0.1:3000/import_history?order=started_at.desc&limit=50;
         }
         location /health {
-            proxy_pass http://localhost:8888/health;
+            proxy_pass http://127.0.0.1:8888/health;
         }
         location /api/ {
-            proxy_pass http://localhost:3000/;
+            proxy_pass http://127.0.0.1:3000/;
         }
     }
 }
@@ -84,6 +95,7 @@ VOLUME ["$HOMEDIR/data"]
 COPY <<EOF run.sh
 /usr/sbin/crond -L /var/log/crond.log &
 /usr/local/bin/docker-entrypoint.sh postgres &
+until pg_isready -q; do sleep 1; done
 /usr/local/bin/postgrest ${HOMEDIR}/postgrest.conf &
 /usr/local/bin/api-server &
 nginx -c ${HOMEDIR}/nginx.conf -g "daemon off;"

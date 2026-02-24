@@ -37,8 +37,8 @@ func (pt *progressTracker) Read(p []byte) (int, error) {
 		}
 
 		db.ExecContext(pt.ctx,
-			`UPDATE import_history SET download_percentage = $1, download_speed = $2, download_duration = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER, file_name = $3, file_size = $4, total_files = $5, current_file_index = $6 WHERE job_id = $7`,
-			currentPct, speedStr, pt.fileName, pt.totalBytes, pt.totalFiles, pt.currentFileIndex, pt.jobID)
+			`UPDATE import_history SET download_percentage = $1, download_speed = $2, download_duration = EXTRACT(EPOCH FROM (NOW() - started_at))::INTEGER, file_size = $3, total_files = $4, current_file_index = $5 WHERE job_id = $6`,
+			currentPct, speedStr, pt.totalBytes, pt.totalFiles, pt.currentFileIndex, pt.jobID)
 	}
 
 	return n, err
@@ -73,6 +73,7 @@ func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID stri
 	}
 
 	var date string
+	var found bool
 	for i := 0; i < lookbackDays; i++ {
 		date = getDateDaysAgo(i)
 		url := fmt.Sprintf("https://ton.twimg.com/birdwatch-public-data/%s/notes/notes-00000.zip",
@@ -85,8 +86,13 @@ func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID stri
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
+			found = true
 			break
 		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("no data files found in the last %d days", lookbackDays)
 	}
 
 	totalFiles := discoverFileCount(ctx, date)
@@ -104,10 +110,11 @@ func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID stri
 
 	var files []FileInfo
 	for i := 0; i < totalFiles; i++ {
-		filename := formatFileName(i) + ".zip"
-		filepath := filepath.Join(dataDir, fmt.Sprintf("%s-%s", date, filename))
+		filename := fmt.Sprintf("%s-%s", date, formatFileName(i)+".zip")
+		filepath := filepath.Join(dataDir, filename)
+		urlFilename := formatFileName(i) + ".zip"
 		url := fmt.Sprintf("https://ton.twimg.com/birdwatch-public-data/%s/notes/%s",
-			formatDateForURL(date), filename)
+			formatDateForURL(date), urlFilename)
 
 		var fileSize int64
 		var cached bool
@@ -118,7 +125,7 @@ func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID stri
 			fileSize = info.Size()
 			cached = true
 
-			db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_name = $2, file_size = $3, download_cached = $4, download_percentage = 100 WHERE job_id = $5`, i, filename, fileSize, cached, jobID)
+			db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_size = $2, download_cached = $3, download_percentage = 100 WHERE job_id = $4`, i, fileSize, cached, jobID)
 		} else {
 			logger.Info("Downloading file", "url", url, "path", filepath)
 
@@ -166,7 +173,7 @@ func downloadNotesWithProgress(ctx context.Context, lookbackDays int, jobID stri
 			logger.Info("Downloaded file", "path", filepath)
 		}
 
-		db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_name = $2, file_size = $3, download_cached = $4 WHERE job_id = $5`, i, filename, fileSize, cached, jobID)
+		db.ExecContext(ctx, `UPDATE import_history SET current_file_index = $1, file_size = $2, download_cached = $3 WHERE job_id = $4`, i, fileSize, cached, jobID)
 
 		tsvPath, err := extractTSV(filepath, i)
 		if err != nil {
@@ -283,12 +290,10 @@ func truncateTSV(tsvPath string, maxLines int) error {
 
 func setImportFailed(jobID, errMsg string) {
 	db.ExecContext(context.Background(), `UPDATE import_history SET status = 'failed', error_message = $1, completed_at = NOW() WHERE job_id = $2`, errMsg, jobID)
-	currentJobID = nil
 }
 
 func sanitizeImportStatus() {
 	ctx := context.Background()
-	currentJobID = nil
 
 	_, err := db.ExecContext(ctx, `
 		UPDATE import_history 

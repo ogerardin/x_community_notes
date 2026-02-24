@@ -10,13 +10,12 @@ import (
 )
 
 var (
-	db           *sql.DB
-	currentJobID *string
-	dbHost       = getEnv("DB_HOST", "localhost")
-	dbPort       = "5432"
-	dbUser       = "postgres"
-	dbPassword   = "example"
-	dbName       = "postgres"
+	db         *sql.DB
+	dbHost     = getEnv("DB_HOST", "localhost")
+	dbPort     = "5432"
+	dbUser     = "postgres"
+	dbPassword = "example"
+	dbName     = "postgres"
 )
 
 func initDBWithRetry(maxRetries int, delay time.Duration) error {
@@ -48,11 +47,10 @@ func initDBWithRetry(maxRetries int, delay time.Duration) error {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 
+		// Notify PostgREST to reload its schema cache after migrations
+		db.ExecContext(context.Background(), "NOTIFY pgrst, 'reload schema'")
+
 		return nil
 	}
 	return fmt.Errorf("failed to connect after %d retries: %w", maxRetries, err)
-}
-
-func updateImportJob(ctx context.Context, jobID string, query string, args ...interface{}) {
-	db.ExecContext(ctx, query, args...)
 }

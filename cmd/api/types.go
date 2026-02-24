@@ -20,7 +20,6 @@ type HistoryEntry struct {
 	DownloadCached     *bool      `json:"download_cached,omitempty"`
 	DownloadDuration   *int       `json:"download_duration,omitempty"`
 	ImportDuration     *int       `json:"import_duration,omitempty"`
-	FileName           *string    `json:"file_name,omitempty"`
 	FileSize           *int64     `json:"file_size,omitempty"`
 	TotalFiles         *int       `json:"total_files,omitempty"`
 	CurrentFileIndex   *int       `json:"current_file_index,omitempty"`
@@ -39,7 +38,6 @@ type ImportStatus struct {
 	ErrorMessage       *string    `json:"error_message,omitempty"`
 	DownloadPercentage *int       `json:"download_percentage,omitempty"`
 	DownloadSpeed      *string    `json:"download_speed,omitempty"`
-	FileName           *string    `json:"file_name,omitempty"`
 	FileSize           *int64     `json:"file_size,omitempty"`
 	ImportDuration     *int       `json:"import_duration,omitempty"`
 	TotalFiles         *int       `json:"total_files,omitempty"`
