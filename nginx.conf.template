@@ -3,41 +3,40 @@ events {}
 http {
     server {
         listen 80;
+        root /data/www;
+        index index.html;
         location / {
-            root /data/www;
-            index index.html;
             try_files $uri $uri/ /admin.html;
             add_header Cache-Control "no-store";
         }
 
         location /admin.html {
-            root /data/www;
+        root /home/www;
             add_header Cache-Control "no-store";
         }
 
         location /api/imports/current {
-            proxy_pass http://postgrest:3000/import_history?order=started_at.desc&limit=1;
+            proxy_pass http://__POSTGREST__:3000/import_history?order=started_at.desc&limit=1;
         }
 
         location /api/imports/create {
-            proxy_pass http://api:8888/imports;
+            proxy_pass http://__API__:8888/imports;
         }
 
         location /api/imports/ {
-            proxy_pass http://api:8888/imports/;
+            proxy_pass http://__API__:8888/imports/;
         }
 
         location /api/imports {
-            proxy_pass http://postgrest:3000/import_history?order=started_at.desc&limit=50;
+            proxy_pass http://__POSTGREST__:3000/import_history?order=started_at.desc&limit=50;
         }
 
         location /health {
-            proxy_pass http://api:8888/health;
+            proxy_pass http://__API__:8888/health;
         }
 
         location /api/ {
-            proxy_pass http://postgrest:3000/;
+            proxy_pass http://__POSTGREST__:3000/;
         }
     }
-
 }

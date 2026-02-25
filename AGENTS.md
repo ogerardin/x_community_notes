@@ -22,20 +22,20 @@ There are no automated tests. Manual verification via API testing commands below
 
 ### Docker
 
-Two deployment modes:
+Two deployment modes share a common Go build stage:
 
 #### Development (Docker Compose)
 Use `compose.yaml` for local development.
 
 ```bash
 # Build and start all services
-docker compose up -d --build
+make up
 
-# View API logs
-docker logs x-notes-api
+# View logs
+make logs
 
 # Stop all services
-docker compose down
+make down
 ```
 
 #### Distribution (Single Container)
@@ -43,7 +43,7 @@ Use `Dockerfile-dist` for production (Postgres + PostgREST + Nginx + API).
 
 ```bash
 # Build and run single container
-./build_and_run.sh
+make run
 ```
 
 **Important:** Changes must work in both modes. Test in single-container mode before committing.
@@ -81,7 +81,11 @@ curl http://localhost:8080/api/imports
 |------|---------|
 | `compose.yaml` | Docker Compose config |
 | `Dockerfile-dist` | Single container Dockerfile |
-| `cmd/api/Dockerfile` | API image for compose |
+| `cmd/api/Dockerfile` | API image for compose (uses builder) |
+| `cmd/api/Dockerfile-builder` | Shared Go build stage |
+| `Makefile` | Build orchestration |
+| `build_multi.sh` | Multi-arch build & push to Hub |
+| `nginx.conf.template` | Nginx config with placeholders |
 | `sql/pg_hba.conf` | PostgreSQL auth config (trust for Docker) |
 | `cmd/api/main.go` | Server setup, routes |
 | `cmd/api/db.go` | DB connection, retry, migrations |

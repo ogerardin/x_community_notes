@@ -1,22 +1,12 @@
-FROM golang:1.26-alpine AS builder
-
-WORKDIR /src
-
-# Copy Go module files and download dependencies
-COPY cmd/api/go.mod cmd/api/go.sum ./
-RUN go mod download
-
-# Build the API server
-COPY cmd/api/*.go ./
-COPY cmd/api/migrations/ ./migrations/
-RUN CGO_ENABLED=0 GOOS=linux go build -o api-server
+# Build stage
+FROM x-notes-builder AS builder
 
 # Final stage
 FROM postgres:17-alpine
 
 ARG POSTGRES_HOST_AUTH_METHOD=trust
 ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}
-ENV POSTGREST_VERSION=14.3
+ENV POSTGREST_VERSION=14.5
 ENV HOMEDIR=/home
 
 RUN apk add --no-cache curl nginx unzip
@@ -44,42 +34,10 @@ EOF
 # Add the static files for the web interface
 COPY www/* ./www/
 
-# Generate the Nginx configuration file
-COPY <<EOF nginx.conf
-events {}
-http {
-    server {
-        listen 80;
-        root ${HOMEDIR}/www;
-        index index.html;
-        location / {
-            try_files \$uri \$uri/ /admin.html;
-            add_header Cache-Control "no-store";
-        }
-        location /admin.html {
-            add_header Cache-Control "no-store";
-        }
-        location /api/imports/current {
-            proxy_pass http://127.0.0.1:3000/import_history?order=started_at.desc&limit=1;
-        }
-        location /api/imports/create {
-            proxy_pass http://127.0.0.1:8888/imports;
-        }
-        location /api/imports/ {
-            proxy_pass http://127.0.0.1:8888/imports/;
-        }
-        location /api/imports {
-            proxy_pass http://127.0.0.1:3000/import_history?order=started_at.desc&limit=50;
-        }
-        location /health {
-            proxy_pass http://127.0.0.1:8888/health;
-        }
-        location /api/ {
-            proxy_pass http://127.0.0.1:3000/;
-        }
-    }
-}
-EOF
+# Generate the Nginx configuration file from template
+COPY nginx.conf.template ./nginx.conf.template
+RUN sed -e 's/__POSTGREST__/127.0.0.1/g' -e 's/__API__/127.0.0.1/g' nginx.conf.template > nginx.conf && \
+    grep -q "127.0.0.1:3000" nginx.conf && rm nginx.conf.template
 
 
 # Copy the API server binary from builder
