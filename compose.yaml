@@ -7,9 +7,10 @@ services:
     # set shared memory limit when using docker-compose
     shm_size: 128mb
     environment:
-      POSTGRES_PASSWORD: example
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - x-notes-db:/var/lib/postgresql/data
+      - ./sql/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
       - ./sql/notes_ddl.sql:/docker-entrypoint-initdb.d/notes_ddl.sql
       - ./data:/home/data
     ports:
@@ -33,7 +34,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      PGRST_DB_URI: postgres://postgres:example@db:5432/postgres
+      PGRST_DB_URI: postgres://postgres@db:5432/postgres
       PGRST_OPENAPI_SERVER_PROXY_URI: http://localhost:3000
       PGRST_DB_ANON_ROLE: postgres
       PGRST_DB_AGGREGATES_ENABLED: "true"

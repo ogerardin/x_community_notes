@@ -9,3 +9,6 @@ target/
 /data/
 
 .instance_ocid
+
+# Compiled binaries
+cmd/api/x-notes-api

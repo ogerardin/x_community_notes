@@ -14,7 +14,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o api-server
 # Final stage
 FROM postgres:17-alpine
 
-ENV POSTGRES_PASSWORD=example
+ARG POSTGRES_HOST_AUTH_METHOD=trust
+ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}
 ENV POSTGREST_VERSION=14.3
 ENV HOMEDIR=/home
 
@@ -35,7 +36,7 @@ RUN tar -xf postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz \
 
 # Generate the PostgREST configuration file
 COPY <<EOF postgrest.conf
-db-uri = "postgres://postgres:$POSTGRES_PASSWORD@localhost:5432/postgres"
+db-uri = "postgres://postgres@localhost:5432/postgres"
 db-anon-role = "postgres"
 db-aggregates-enabled = true
 EOF

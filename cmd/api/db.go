@@ -14,7 +14,7 @@ var (
 	dbHost     = getEnv("DB_HOST", "localhost")
 	dbPort     = "5432"
 	dbUser     = "postgres"
-	dbPassword = "example"
+	dbPassword = getEnv("DB_PASSWORD", "")
 	dbName     = "postgres"
 )
 
