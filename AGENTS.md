@@ -86,16 +86,15 @@ curl http://localhost:8080/api/imports
 | `Makefile` | Build orchestration |
 | `build_multi.sh` | Multi-arch build & push to Hub |
 | `nginx.conf.template` | Nginx config with placeholders |
-| `sql/pg_hba.conf` | PostgreSQL auth config (trust for Docker) |
+| `config/pg_hba.conf` | PostgreSQL auth config (trust for Docker) |
 | `cmd/api/main.go` | Server setup, routes |
-| `cmd/api/db.go` | DB connection, retry, migrations |
+| `cmd/api/db.go` | DB connection, retry |
 | `cmd/api/handlers.go` | HTTP handlers |
 | `cmd/api/importer.go` | Download, extract, COPY logic |
 | `cmd/api/types.go` | Structs for JSON/DB |
 | `cmd/api/utils.go` | Helpers (null conversions, HTTP errors) |
-| `cmd/api/migrations.go` | golang-migrate runner |
-| `cmd/api/migrations/` | SQL migration files |
-| `sql/notes_ddl.sql` | Initial schema (single-container init) |
+| `sql/notes_ddl.sql` | note table schema |
+| `sql/import_history_ddl.sql` | import_history table schema |
 
 ## Code Style Guidelines
 
@@ -131,7 +130,6 @@ Standard Go import grouping (enforced by `goimports`):
 #### Database
 - Parameterized queries (`$1`, `$2`, ...) — never string-format SQL
 - Use `context.Background()` for background goroutines; use request `ctx` for handlers
-- After migrations: `NOTIFY pgrst, 'reload schema'` for PostgREST cache refresh
 
 #### Concurrency
 - Import jobs: goroutines with `sync.Mutex` for shared counters
@@ -144,12 +142,11 @@ Standard Go import grouping (enforced by `goimports`):
 - State in AlpineJS `x-data` object
 - Polling: 2s for active import, 5s for status/health
 
-### Migrations
-- Embedded via `//go:embed migrations`
-- Numbered sequentially: `002_...up.sql`
-- Only `.up.sql` files
-- **Do not renumber or delete** — `golang-migrate` tracks applied versions
-- `sql/notes_ddl.sql` must stay in sync with cumulative migrations
+### Database Initialization
+- DDL scripts in `sql/*.sql` are executed on first database init
+- Both compose and single-container mount `sql/` to `/docker-entrypoint-initdb.d/`
+- `sql/notes_ddl.sql` — note table
+- `sql/import_history_ddl.sql` — import_history table
 
 ### Docker
 - Multi-stage builds for Go; pin versions (`golang:1.26-alpine`, `postgres:17-alpine`)
@@ -158,7 +155,7 @@ Standard Go import grouping (enforced by `goimports`):
 
 ### Authentication
 - PostgreSQL uses `trust` authentication for internal container communication
-- Custom `sql/pg_hba.conf` enables trust for Docker networks (172.16.0.0/12, 192.168.0.0/16)
+- Custom `config/pg_hba.conf` enables trust for Docker networks (172.16.0.0/12, 192.168.0.0/16)
 - External connections require password (scram-sha-256)
 - Volume `x-notes-db` is shared between compose and single-container deployments
 

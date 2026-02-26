@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -42,13 +41,6 @@ func initDBWithRetry(maxRetries int, delay time.Duration) error {
 			time.Sleep(delay)
 			continue
 		}
-
-		if err := runMigrations(db); err != nil {
-			return fmt.Errorf("migration failed: %w", err)
-		}
-
-		// Notify PostgREST to reload its schema cache after migrations
-		db.ExecContext(context.Background(), "NOTIFY pgrst, 'reload schema'")
 
 		return nil
 	}

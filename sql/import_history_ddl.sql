@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS import_history (
     download_duration INT,
     import_started_at TIMESTAMP,
     import_duration INT,
-    file_name TEXT,
     file_size BIGINT,
     total_files INT,
     current_file_index INT,

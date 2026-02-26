@@ -6,5 +6,4 @@ COPY cmd/api/go.mod cmd/api/go.sum ./
 RUN go mod download
 
 COPY cmd/api/*.go ./
-COPY cmd/api/migrations/ ./migrations/
 RUN CGO_ENABLED=0 GOOS=linux go build -o api-server

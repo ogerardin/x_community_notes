@@ -34,6 +34,7 @@ build-dist: build-builder
 	@docker build -t $(DOCKER_DIST) -f Dockerfile-dist .
 
 up: build-builder
+	@docker volume create x-notes-db 2>/dev/null || true
 	@docker stop $(CONTAINER_NAME) 2>/dev/null && docker rm $(CONTAINER_NAME) || true
 	@docker compose up -d --build
 
@@ -58,4 +59,5 @@ clean:
 	@echo "All containers stopped"
 
 status:
+	@echo "Mode: $(MODE)"
 	@docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "x-notes" || echo "No containers running"

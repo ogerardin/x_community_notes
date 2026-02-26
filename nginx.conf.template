@@ -3,15 +3,14 @@ events {}
 http {
     server {
         listen 80;
-        root /data/www;
+        root /home/www;
         index index.html;
         location / {
-            try_files $uri $uri/ /admin.html;
+            try_files $uri $uri/ =404;
             add_header Cache-Control "no-store";
         }
 
         location /admin.html {
-        root /home/www;
             add_header Cache-Control "no-store";
         }
 

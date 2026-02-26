@@ -2,7 +2,7 @@
 FROM x-notes-builder AS builder
 
 # Final stage
-FROM postgres:17-alpine
+FROM postgres:18-alpine
 
 ARG POSTGRES_HOST_AUTH_METHOD=trust
 ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}

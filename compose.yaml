@@ -1,7 +1,7 @@
 services:
 
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: x-notes-db
     restart: always
     # set shared memory limit when using docker-compose
@@ -10,8 +10,8 @@ services:
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - x-notes-db:/var/lib/postgresql/data
-      - ./sql/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
-      - ./sql:/docker-entrypoint-initdb.d/sql:ro
+      - ./config/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
+      - ./sql:/docker-entrypoint-initdb.d:ro
       - ./data:/home/data
     ports:
       - "5432:5432"
