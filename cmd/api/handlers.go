@@ -279,7 +279,13 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 			importDuration = 0
 		}
 
-		_, err = db.ExecContext(ctx, `UPDATE import_history SET status = 'completed', total_rows = $1, completed_at = NOW(), import_duration = $2 WHERE job_id = $3`, totalRows, importDuration, jobID)
+		var dataDate string
+		if len(files) > 0 {
+			dataDate = strings.Split(files[0].FileName, "-notes-")[0]
+			dataDate = fmt.Sprintf("20%s-%s-%s", dataDate[0:2], dataDate[2:4], dataDate[4:6])
+		}
+
+		_, err = db.ExecContext(ctx, `UPDATE import_history SET status = 'completed', total_rows = $1, completed_at = NOW(), import_duration = $2, data_date = $4 WHERE job_id = $3`, totalRows, importDuration, jobID, dataDate)
 		if err != nil {
 			logger.Warn("Failed to update status", "error", err)
 		}
@@ -291,4 +297,82 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
+}
+
+func getLatestAvailableDate(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	for i := 0; i < 7; i++ {
+		date := getDateDaysAgo(i)
+		url := fmt.Sprintf("https://ton.twimg.com/birdwatch-public-data/%s/notes/notes-00000.zip",
+			formatDateForURL(date))
+
+		req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
+		if err != nil {
+			continue
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"date": date})
+			return
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	json.NewEncoder(w).Encode(map[string]string{"error": "no data found in last 7 days"})
+}
+
+func getLastImportDate(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	var dataDate string
+	err := db.QueryRowContext(ctx, `
+		SELECT data_date::text FROM import_history
+		WHERE status = 'completed' AND data_date IS NOT NULL
+		ORDER BY completed_at DESC LIMIT 1
+	`).Scan(&dataDate)
+
+	if err == sql.ErrNoRows {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"error": "no completed imports found"})
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to query: "+err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"date": dataDate})
+}
+
+func getSchedulerStatus(w http.ResponseWriter, r *http.Request) {
+	scheduler.mu.RLock()
+	defer scheduler.mu.RUnlock()
+
+	ctx := context.Background()
+	var lastDataDate string
+	db.QueryRowContext(ctx, `
+		SELECT data_date::text FROM import_history
+		WHERE status = 'completed' AND data_date IS NOT NULL
+		ORDER BY completed_at DESC LIMIT 1
+	`).Scan(&lastDataDate)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"enabled":        autoImportEnabled,
+		"interval":       autoImportInterval.String(),
+		"last_check":     scheduler.lastCheck,
+		"next_run":       scheduler.nextRun,
+		"last_data_date": lastDataDate,
+	})
 }

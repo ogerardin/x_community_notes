@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS import_history (
     total_files INT,
     current_file_index INT,
     files_processed INT,
-    file_names TEXT
+    file_names TEXT,
+    data_date DATE
 );
 
 CREATE INDEX IF NOT EXISTS idx_import_history_started_at ON import_history(started_at DESC);

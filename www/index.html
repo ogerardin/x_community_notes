@@ -130,6 +130,7 @@
                 backendOnline: true,
                 importPollInterval: null,
                 importHistory: [],
+                schedulerStatus: null,
                 formatDuration(seconds) {
                     if (seconds === null || seconds === undefined) return '';
                     const m = Math.floor(seconds / 60);
@@ -141,6 +142,18 @@
                     if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
                     if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
                     return Math.round(bytes / 1e3) + ' KB';
+                },
+                formatRemainingTime(nextRun) {
+                    if (!nextRun) return '-';
+                    const now = new Date();
+                    const next = new Date(nextRun);
+                    const diffMs = next - now;
+                    if (diffMs <= 0) return 'now';
+                    const mins = Math.floor(diffMs / 60000);
+                    if (mins < 60) return 'in ' + mins + 'm';
+                    const hours = Math.floor(mins / 60);
+                    const remainingMins = mins % 60;
+                    return 'in ' + (remainingMins > 0 ? hours + 'h ' + remainingMins + 'm' : hours + 'h');
                 },
                 async fetchImportStatus() {
                     try {
@@ -168,15 +181,23 @@
                         this.importHistory = await resp.json() || [];
                     } catch (e) {}
                 },
+                async fetchSchedulerStatus() {
+                    try {
+                        let resp = await fetch('/api/imports/scheduler');
+                        if (resp.ok) {
+                            this.schedulerStatus = await resp.json();
+                        }
+                    } catch (e) {}
+                },
                 async triggerImport() {
                     try {
                         this.importError = '';
                         if (this.importStatus?.status === 'importing' || this.importStatus?.status === 'downloading') {
-                            this.importError = 'Import already in progress';
+                            this.importError = 'Update already in progress';
                             return;
                         }
                         let resp = await fetch('/api/imports/create', { method: 'POST' });
-                        if (!resp.ok) throw new Error('Failed to trigger import: ' + resp.status);
+                        if (!resp.ok) throw new Error('Failed to trigger update: ' + resp.status);
                         await this.fetchImportStatus();
                         await this.fetchImportHistory();
                     } catch (e) {
@@ -187,7 +208,7 @@
                     try {
                         if (!this.importStatus?.job_id) return;
                         let resp = await fetch('/api/imports/' + this.importStatus.job_id, { method: 'DELETE' });
-                        if (!resp.ok) throw new Error('Failed to abort import');
+                        if (!resp.ok) throw new Error('Failed to abort update');
                         await this.fetchImportStatus();
                         await this.fetchImportHistory();
                     } catch (e) {
@@ -219,6 +240,8 @@
                 init() {
                     this.fetchImportStatus();
                     this.fetchImportHistory();
+                    this.fetchSchedulerStatus();
+                    setInterval(() => this.fetchSchedulerStatus(), 60000);
                 },
             }));
         });
@@ -233,7 +256,7 @@
                 <svg class="spinner" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4"/></svg>
                 <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?'))"></span>)
             </span>
-            <span class="header-stats" x-show="!importStatus || (importStatus?.status !== 'importing' && importStatus?.status !== 'downloading')" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes, Latest: <span x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleDateString() : 'N/A'"></span>)</span>
+            <span class="header-stats" x-show="!importStatus || (importStatus?.status !== 'importing' && importStatus?.status !== 'downloading')" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes<template x-if="latestTimestamp">, Latest: <span x-text="new Date(latestTimestamp).toLocaleDateString()"></span></template>)</span>
         </div>
         <nav class="tabs">
             <button 
@@ -335,8 +358,24 @@
 
         <div class="stats-grid">
             <div class="stat-card">
-                <span class="stat-label">Import Status</span>
+                <span class="stat-label">Update Status</span>
                 <span class="badge" :class="statusBadgeClass(importStatus?.status)" x-text="importStatus?.status || 'idle'"></span>
+            </div>
+            <div class="stat-card" x-show="schedulerStatus">
+                <span class="stat-label">Last Import Data Date</span>
+                <span x-text="schedulerStatus?.last_data_date || '-'"></span>
+            </div>
+            <div class="stat-card" x-show="schedulerStatus">
+                <span class="stat-label">Auto-Update</span>
+                <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                    <div x-show="schedulerStatus?.enabled" style="color: var(--text-secondary);">
+                        Every <span x-text="schedulerStatus?.interval || '1h'"></span>
+                    </div>
+                    <div x-show="schedulerStatus?.enabled" style="color: var(--text-secondary);">
+                        Next: <span x-text="formatRemainingTime(schedulerStatus?.next_run)"></span>
+                    </div>
+                    <div x-show="!schedulerStatus?.enabled" style="color: var(--text-muted);">Disabled</div>
+                </div>
             </div>
         </div>
 
@@ -362,7 +401,7 @@
         <div class="error-msg" x-show="importError" x-text="importError"></div>
 
         <div class="card">
-            <h2 style="margin-bottom: 1rem;">Import History</h2>
+            <h2 style="margin-bottom: 1rem;">Update History</h2>
             <div class="table-wrapper">
                 <table>
                     <thead>
@@ -422,7 +461,7 @@
                     </tbody>
                     <tbody x-show="importHistory.length === 0">
                         <tr>
-                            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No import history</td>
+                            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No update history</td>
                         </tr>
                     </tbody>
                 </table>

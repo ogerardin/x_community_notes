@@ -72,6 +72,8 @@ services:
     container_name: x-notes-api
     environment:
       - DB_HOST=db
+      - AUTO_IMPORT_ENABLED=true
+      - AUTO_IMPORT_INTERVAL=1h
     depends_on:
       - db
     volumes:
