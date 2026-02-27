@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>X/Twitter Community Notes</title>
-    <link rel="stylesheet" href="/styles.css?v=9">
+    <link rel="stylesheet" href="/styles.css?v=13">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>
         document.addEventListener('alpine:init', () => {
@@ -229,6 +229,11 @@
     <div class="header-content">
         <div class="header-title">
             <h1>X/Twitter Searchable Community Notes Database</h1>
+            <span class="header-stats" x-show="importStatus?.status === 'importing' || importStatus?.status === 'downloading'" x-cloak style="color: var(--accent);">
+                <svg class="spinner" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4"/></svg>
+                <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?'))"></span>)
+            </span>
+            <span class="header-stats" x-show="!importStatus || (importStatus?.status !== 'importing' && importStatus?.status !== 'downloading')" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes, Latest: <span x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleDateString() : 'N/A'"></span>)</span>
         </div>
         <nav class="tabs">
             <button 
@@ -244,19 +249,6 @@
         </nav>
     </div>
 </header>
-
-<div class="top-bar">
-    <span><span x-text="noteCount.toLocaleString()"></span> notes</span>
-    <span style="margin-left: 1rem;">Latest: <span x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleDateString() : 'N/A'"></span></span>
-</div>
-
-<template x-if="importStatus?.status === 'importing' || importStatus?.status === 'downloading'">
-    <div class="importing-banner">
-        <div class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></div>
-        <span>Import in progress: <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?') + ' rows')"></span>)</span>
-        <a href="#admin" style="color: inherit; text-decoration: underline; margin-left: 0.5rem;" @click="activeTab = 'admin'">View details</a>
-    </div>
-</template>
 
 <main class="container">
 
@@ -364,15 +356,6 @@
                     <line x1="9" y1="9" x2="15" y2="15"></line>
                 </svg>
                 Abort
-            </button>
-            <button class="btn btn-secondary" @click="refreshNoteStats(); fetchImportHistory();">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                    <path d="M3 3v5h5"></path>
-                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
-                    <path d="M16 16h5v5"></path>
-                </svg>
-                Refresh
             </button>
         </div>
 
