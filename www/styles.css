@@ -570,6 +570,29 @@ tr:hover td {
     font-weight: 500;
 }
 
+/* Import in progress banner */
+.importing-banner {
+    background: var(--accent);
+    color: white;
+    padding: 0.75rem 1rem;
+    text-align: center;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+/* Top bar */
+.top-bar {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    padding: 0.5rem 1rem;
+    text-align: center;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border);
+}
+
 /* Error message */
 .error-msg {
     background: var(--error-bg);

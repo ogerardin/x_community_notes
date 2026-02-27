@@ -4,16 +4,54 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>X/Twitter Community Notes</title>
-    <link rel="stylesheet" href="/styles.css?v=6">
+    <link rel="stylesheet" href="/styles.css?v=9">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>
         document.addEventListener('alpine:init', () => {
             Alpine.data('tabs', () => ({
-                activeTab: window.location.hash?.slice(1) || 'search',
                 setTab(tab) {
                     this.activeTab = tab;
                     window.location.hash = tab;
                 }
+            }));
+
+            Alpine.data('app', () => ({
+                activeTab: window.location.hash?.slice(1) || 'search',
+                noteCount: 0,
+                latestTimestamp: null,
+                importStatus: null,
+                setTab(tab) {
+                    this.activeTab = tab;
+                    window.location.hash = tab;
+                },
+                async refreshNoteStats() {
+                    try {
+                        let resp = await fetch('/api/note?select=summary.count()');
+                        let data = await resp.json();
+                        this.noteCount = data[0]?.count ?? 0;
+                        resp = await fetch('/api/note?select=createdatmillis.max()');
+                        data = await resp.json();
+                        this.latestTimestamp = data[0]?.max ?? 0;
+                    } catch (e) {}
+                },
+                async fetchImportStatus() {
+                    try {
+                        let resp = await fetch('/api/imports/current');
+                        if (resp.ok) {
+                            let data = await resp.json();
+                            this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
+                        }
+                    } catch (e) {}
+                },
+                init() {
+                    this.refreshNoteStats();
+                    this.fetchImportStatus();
+                    setInterval(() => this.refreshNoteStats(), 30000);
+                    setInterval(() => this.fetchImportStatus(), 5000);
+                    window.addEventListener('hashchange', () => {
+                        this.activeTab = window.location.hash?.slice(1) || 'search';
+                    });
+                },
             }));
 
             Alpine.data('searchTab', () => ({
@@ -23,8 +61,6 @@
                 error: '',
                 offset: 0,
                 hasMore: true,
-                noteCount: 0,
-                latestTimestamp: null,
                 totalCount: 0,
                 async fetchItems(append = false) {
                     if (!append) {
@@ -75,7 +111,6 @@
                 },
                 init() {
                     this.setupInfiniteScroll();
-                    this.refreshNoteStats();
                 },
                 formatSummary(summary) {
                     if (!summary) return '';
@@ -87,21 +122,9 @@
                     for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
                     return 'hsl(' + (Math.abs(hash) % 360) + ', 60%, 45%)';
                 },
-                async refreshNoteStats() {
-                    try {
-                        let resp = await fetch('/api/note?select=summary.count()');
-                        let data = await resp.json();
-                        this.noteCount = data[0]?.count ?? 0;
-                        resp = await fetch('/api/note?select=createdatmillis.max()');
-                        data = await resp.json();
-                        this.latestTimestamp = data[0]?.max ?? 0;
-                    } catch (e) {}
-                },
             }));
 
             Alpine.data('adminTab', () => ({
-                noteCount: 0,
-                latestTimestamp: null,
                 importStatus: null,
                 importError: '',
                 backendOnline: true,
@@ -118,16 +141,6 @@
                     if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
                     if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
                     return Math.round(bytes / 1e3) + ' KB';
-                },
-                async refreshNoteStats() {
-                    try {
-                        let resp = await fetch('/api/note?select=summary.count()');
-                        let data = await resp.json();
-                        this.noteCount = data[0]?.count ?? 0;
-                        resp = await fetch('/api/note?select=createdatmillis.max()');
-                        data = await resp.json();
-                        this.latestTimestamp = data[0]?.max ?? 0;
-                    } catch (e) {}
                 },
                 async fetchImportStatus() {
                     try {
@@ -186,7 +199,6 @@
                     this.importPollInterval = setInterval(() => {
                         this.fetchImportStatus();
                         this.fetchImportHistory();
-                        this.refreshNoteStats();
                     }, 2000);
                 },
                 stopPolling() {
@@ -206,21 +218,19 @@
                 },
                 init() {
                     this.fetchImportStatus();
-                    this.refreshNoteStats();
                     this.fetchImportHistory();
-                    setInterval(() => this.fetchImportStatus(), 5000);
                 },
             }));
         });
     </script>
 </head>
-<body x-data="{ activeTab: window.location.hash?.slice(1) || 'search' }" @hashchange.window="activeTab = window.location.hash?.slice(1) || 'search'">
+<body x-data="app()">
 <header class="header">
     <div class="header-content">
         <div class="header-title">
             <h1>X/Twitter Searchable Community Notes Database</h1>
         </div>
-        <nav class="tabs" x-data="tabs()">
+        <nav class="tabs">
             <button 
                 class="tab" 
                 :class="{ 'active': activeTab === 'search' }"
@@ -235,6 +245,19 @@
     </div>
 </header>
 
+<div class="top-bar">
+    <span><span x-text="noteCount.toLocaleString()"></span> notes</span>
+    <span style="margin-left: 1rem;">Latest: <span x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleDateString() : 'N/A'"></span></span>
+</div>
+
+<template x-if="importStatus?.status === 'importing' || importStatus?.status === 'downloading'">
+    <div class="importing-banner">
+        <div class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></div>
+        <span>Import in progress: <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?') + ' rows')"></span>)</span>
+        <a href="#admin" style="color: inherit; text-decoration: underline; margin-left: 0.5rem;" @click="activeTab = 'admin'">View details</a>
+    </div>
+</template>
+
 <main class="container">
 
     <!-- SEARCH TAB -->
@@ -246,17 +269,6 @@
                 <span>Loading...</span>
             </div>
         </template>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <span class="stat-label">Total Notes</span>
-                <span class="stat-value" x-text="noteCount.toLocaleString()"></span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-label">Latest Update</span>
-                <span class="stat-sub" x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A'"></span>
-            </div>
-        </div>
 
         <div class="search-section">
             <div class="search-wrapper">
@@ -278,15 +290,6 @@
                         <path d="m21 21-4.35-4.35"></path>
                     </svg>
                     Search
-                </button>
-                <button class="btn btn-secondary" @click="refreshNoteStats()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                        <path d="M3 3v5h5"></path>
-                        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
-                        <path d="M16 16h5v5"></path>
-                    </svg>
-                    Refresh
                 </button>
             </div>
         </div>
@@ -339,14 +342,6 @@
         <div class="offline-banner" x-show="!backendOnline">Backend unavailable - Connection lost</div>
 
         <div class="stats-grid">
-            <div class="stat-card">
-                <span class="stat-label">Total Notes</span>
-                <span class="stat-value" x-text="noteCount.toLocaleString()"></span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-label">Latest Update</span>
-                <span class="stat-sub" x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A'"></span>
-            </div>
             <div class="stat-card">
                 <span class="stat-label">Import Status</span>
                 <span class="badge" :class="statusBadgeClass(importStatus?.status)" x-text="importStatus?.status || 'idle'"></span>
