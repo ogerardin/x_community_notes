@@ -1,12 +1,20 @@
 events {}
 
 http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
     server {
         listen 80;
         root /home/www;
         index index.html;
+
         location / {
             try_files $uri $uri/ =404;
+            add_header Cache-Control "no-store";
+        }
+
+        location ~ \.(css|js|html)$ {
             add_header Cache-Control "no-store";
         }
 

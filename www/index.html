@@ -3,417 +3,455 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Note Search</title>
+    <title>Community Notes</title>
+    <link rel="stylesheet" href="/styles.css?v=5">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-        body {
-            font-family: sans-serif;
-            margin: 0;
-            padding: 1em;
-        }
-        h1 {
-            margin-top: 0;
-            font-size: 1.5em;
-        }
-        table {
-            border-collapse: separate;
-            border-spacing: 0;
-            width: 100%;
-            margin-top: 1em;
-            font-size: 0.95em;
-        }
-        th, td {
-            border: 1px solid #ccc;
-            padding: 0.5em;
-            text-align: left;
-            border-left: none;
-            border-top: none;
-        }
-        th:last-child, td:last-child {
-            border-right: none;
-        }
-        th {
-            background: #f4f4f4;
-            position: sticky;
-            top: 0;
-            z-index: 1;
-            box-shadow: 0 1px 0 #ccc;
-            font-size: 0.9em;
-        }
-        .spinner-overlay {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(255,255,255,0.9);
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            z-index: 1000;
-        }
-        .search-bar {
-            margin-bottom: 1em;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5em;
-        }
-        .search-input-wrapper {
-            flex: 1;
-            min-width: 200px;
-            position: relative;
-            display: flex;
-            align-items: center;
-        }
-        .search-bar input {
-            flex: 1;
-            padding: 0.5em;
-            padding-right: 2.5em;
-            font-size: 1em;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            width: 100%;
-        }
-        /* Hide browser's native search clear button */
-        .search-bar input::-webkit-search-cancel-button {
-            display: none;
-        }
-        .clear-btn {
-            position: absolute;
-            right: 0.4em;
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: 0.3em 0.5em;
-            font-size: 1.2em;
-            color: #999;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .clear-btn:hover {
-            color: #666;
-        }
-        .search-bar button.search-btn {
-            padding: 0.5em 1em;
-            font-size: 1em;
-            cursor: pointer;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 4px;
-        }
-        .search-bar button.search-btn:hover {
-            background: #0056b3;
-        }
-        .error { color: #b00; margin-top: 1em; }
-        .no-results { color: #555; margin-top: 1em; }
-        .author-id {
-            font-weight: bold;
-            color: #fff;
-            padding: 0.25em 0.5em;
-            border-radius: 3px;
-            display: inline-block;
-        }
-        .sentinel {
-            height: 20px;
-            margin-bottom: 20px;
-        }
-        .summary-cell {
-            position: relative;
-            word-break: break-word;
-        }
-        .copy-btn, .link-btn {
-            position: absolute;
-            top: 4px;
-            background: #f4f4f4;
-            border: none;
-            cursor: pointer;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 1em;
-            opacity: 0.7;
-            transition: opacity 0.2s;
-        }
-        .copy-btn:hover, .link-btn:hover {
-            opacity: 1;
-            background: #e0e0e0;
-        }
-        .copy-btn {
-            right: 4px;
-        }
-        .link-btn {
-            right: 38px;
-        }
-        .info-row {
-            font-size: 0.9em;
-            color: #666;
-            margin-bottom: 0.5em;
-            display: flex;
-            align-items: center;
-            gap: 1em;
-        }
-        .nav-link {
-            font-size: 0.9em;
-            color: #007bff;
-            text-decoration: none;
-        }
-        .nav-link:hover {
-            text-decoration: underline;
-        }
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('tabs', () => ({
+                activeTab: window.location.hash?.slice(1) || 'search',
+                setTab(tab) {
+                    this.activeTab = tab;
+                    window.location.hash = tab;
+                }
+            }));
 
-        /* Tablet styles */
-        @media (max-width: 768px) {
-            body {
-                padding: 0.5em;
-            }
-            h1 {
-                font-size: 1.2em;
-            }
-            .search-input-wrapper {
-                min-width: 150px;
-            }
-            table {
-                font-size: 0.85em;
-            }
-            th, td {
-                padding: 0.4em;
-            }
-            .copy-btn, .link-btn {
-                padding: 1px 4px;
-                font-size: 0.9em;
-            }
-            .link-btn {
-                right: 32px;
-            }
-        }
+            Alpine.data('searchTab', () => ({
+                loading: false,
+                search: '',
+                items: [],
+                error: '',
+                offset: 0,
+                hasMore: true,
+                noteCount: 0,
+                latestTimestamp: null,
+                totalCount: 0,
+                async fetchItems(append = false) {
+                    if (!append) {
+                        this.items = [];
+                        this.offset = 0;
+                        this.hasMore = true;
+                    }
+                    if (!this.hasMore || this.loading) return;
 
-        /* Mobile styles */
-        @media (max-width: 480px) {
-            body {
-                padding: 0.25em;
-            }
-            h1 {
-                font-size: 1.1em;
-                margin-bottom: 0.5em;
-            }
-            .search-input-wrapper {
-                min-width: 120px;
-            }
-            .search-bar button.search-btn {
-                padding: 0.5em 0.75em;
-                font-size: 0.95em;
-                white-space: nowrap;
-            }
-            table {
-                font-size: 0.8em;
-            }
-            th, td {
-                padding: 0.3em;
-            }
-            .copy-btn, .link-btn {
-                padding: 1px 3px;
-                font-size: 0.85em;
-            }
-            .link-btn {
-                right: 28px;
-            }
-            .info-row {
-                font-size: 0.8em;
-            }
-        }
-    </style>
+                    this.loading = true;
+                    this.error = '';
+                    try {
+                        const response = await fetch('/api/note?limit=50&offset=' + this.offset + '&summary_ts=wfts.' + encodeURIComponent(this.search) + '&select=createdatmillis,noteid,tweetid,noteauthorparticipantid,summary&order=createdatmillis.desc', {
+                            headers: { 'Prefer': 'count=exact' }
+                        });
+                        if (!response.ok) throw new Error('Fetch failed with status ' + response.status);
+
+                        this.totalCount = parseInt(response.headers.get('Content-Range')?.split('/')[1] || '0');
+                        const data = await response.json();
+
+                        if (append) {
+                            this.items = [...this.items, ...data];
+                        } else {
+                            this.items = data;
+                        }
+
+                        this.hasMore = data.length === 50;
+                        this.offset += data.length;
+                    } catch (e) {
+                        this.error = 'Failed to load notes: ' + e.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                setupInfiniteScroll() {
+                    const observer = new IntersectionObserver(entries => {
+                        entries.forEach(entry => {
+                            if (entry.isIntersecting) this.fetchItems(true);
+                        });
+                    }, { rootMargin: '100px' });
+
+                    this.$watch('items', () => {
+                        if (this.hasMore) {
+                            const sentinel = this.$el.querySelector('.scroll-sentinel');
+                            if (sentinel) observer.observe(sentinel);
+                        }
+                    });
+                },
+                init() {
+                    this.setupInfiniteScroll();
+                    this.refreshNoteStats();
+                },
+                formatSummary(summary) {
+                    if (!summary) return '';
+                    let html = summary.replace(/(https?:\/\/[^\s]+)/g, url => '<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a>');
+                    return html.replace(/  /g, '<br>');
+                },
+                hashColor(str) {
+                    let hash = 0;
+                    for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+                    return 'hsl(' + (Math.abs(hash) % 360) + ', 60%, 45%)';
+                },
+                async refreshNoteStats() {
+                    try {
+                        let resp = await fetch('/api/note?select=summary.count()');
+                        let data = await resp.json();
+                        this.noteCount = data[0]?.count ?? 0;
+                        resp = await fetch('/api/note?select=createdatmillis.max()');
+                        data = await resp.json();
+                        this.latestTimestamp = data[0]?.max ?? 0;
+                    } catch (e) {}
+                },
+            }));
+
+            Alpine.data('adminTab', () => ({
+                noteCount: 0,
+                latestTimestamp: null,
+                importStatus: null,
+                importError: '',
+                backendOnline: true,
+                importPollInterval: null,
+                importHistory: [],
+                formatDuration(seconds) {
+                    if (seconds === null || seconds === undefined) return '';
+                    const m = Math.floor(seconds / 60);
+                    const s = seconds % 60;
+                    return m > 0 ? (s > 0 ? m + 'm ' + s + 's' : m + 'm') : s + 's';
+                },
+                formatFileSize(bytes) {
+                    if (bytes === null || bytes === undefined) return '';
+                    if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+                    if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
+                    return Math.round(bytes / 1e3) + ' KB';
+                },
+                async refreshNoteStats() {
+                    try {
+                        let resp = await fetch('/api/note?select=summary.count()');
+                        let data = await resp.json();
+                        this.noteCount = data[0]?.count ?? 0;
+                        resp = await fetch('/api/note?select=createdatmillis.max()');
+                        data = await resp.json();
+                        this.latestTimestamp = data[0]?.max ?? 0;
+                    } catch (e) {}
+                },
+                async fetchImportStatus() {
+                    try {
+                        let resp = await fetch('/api/imports/current');
+                        if (!resp.ok) throw new Error('Failed to fetch import status');
+                        let data = await resp.json();
+                        this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
+                        this.importError = '';
+                        this.backendOnline = true;
+                        this.fetchImportHistory();
+                        if (this.importStatus?.status === 'importing' || this.importStatus?.status === 'downloading') {
+                            this.startPolling();
+                        } else {
+                            this.stopPolling();
+                        }
+                    } catch (e) {
+                        this.backendOnline = false;
+                        this.importError = '';
+                    }
+                },
+                async fetchImportHistory() {
+                    try {
+                        let resp = await fetch('/api/imports');
+                        if (!resp.ok) throw new Error('Failed to fetch import history');
+                        this.importHistory = await resp.json() || [];
+                    } catch (e) {}
+                },
+                async triggerImport() {
+                    try {
+                        this.importError = '';
+                        if (this.importStatus?.status === 'importing' || this.importStatus?.status === 'downloading') {
+                            this.importError = 'Import already in progress';
+                            return;
+                        }
+                        let resp = await fetch('/api/imports/create', { method: 'POST' });
+                        if (!resp.ok) throw new Error('Failed to trigger import: ' + resp.status);
+                        await this.fetchImportStatus();
+                        await this.fetchImportHistory();
+                    } catch (e) {
+                        this.importError = e.message;
+                    }
+                },
+                async abortImport() {
+                    try {
+                        if (!this.importStatus?.job_id) return;
+                        let resp = await fetch('/api/imports/' + this.importStatus.job_id, { method: 'DELETE' });
+                        if (!resp.ok) throw new Error('Failed to abort import');
+                        await this.fetchImportStatus();
+                        await this.fetchImportHistory();
+                    } catch (e) {
+                        this.importError = e.message;
+                    }
+                },
+                startPolling() {
+                    if (this.importPollInterval) return;
+                    this.importPollInterval = setInterval(() => {
+                        this.fetchImportStatus();
+                        this.fetchImportHistory();
+                        this.refreshNoteStats();
+                    }, 2000);
+                },
+                stopPolling() {
+                    if (this.importPollInterval) {
+                        clearInterval(this.importPollInterval);
+                        this.importPollInterval = null;
+                    }
+                },
+                statusBadgeClass(status) {
+                    switch(status) {
+                        case 'completed': return 'badge-success';
+                        case 'failed': return 'badge-error';
+                        case 'importing': 
+                        case 'downloading': return 'badge-info';
+                        default: return 'badge-warning';
+                    }
+                },
+                init() {
+                    this.fetchImportStatus();
+                    this.refreshNoteStats();
+                    this.fetchImportHistory();
+                    setInterval(() => this.fetchImportStatus(), 5000);
+                },
+            }));
+        });
+    </script>
 </head>
-<body>
-<h1>Note Search <a href="/admin.html" class="nav-link" style="font-size: 0.6em; margin-left: 1em;">Admin</a></h1>
-
-<div x-data="{
-        loading: false,
-        search: '',
-        items: [],
-        error: '',
-        offset: 0,
-        hasMore: true,
-        noteCount: 0,
-        latestTimestamp: null,
-        async fetchItems(append = false) {
-            if (!append) {
-                this.items = [];
-                this.offset = 0;
-                this.hasMore = true;
-            }
-            if (!this.hasMore || this.loading) return;
-
-            this.loading = true;
-            this.error = '';
-            try {
-                const response = await fetch(`/api/note?limit=50&offset=${this.offset}&summary_ts=wfts.${encodeURIComponent(this.search)}&select=createdatmillis,noteid,tweetid,noteauthorparticipantid,summary&order=createdatmillis.desc`, {
-                    headers: {
-                        'Prefer': 'count=exact'
-                    }
-                });
-                if (!response.ok) throw new Error('Fetch failed with status ' + response.status);
-
-                this.range = response.headers.get('Content-Range');
-                const totalCount = response.headers.get('Content-Range')?.split('/')[1] || '0';
-                this.totalCount = parseInt(totalCount);
-                const data = await response.json();
-
-                if (append) {
-                    this.items = [...this.items, ...data];
-                } else {
-                    this.items = data;
-                }
-
-                this.hasMore = data.length === 50;
-                this.offset += data.length;
-            } catch (e) {
-                this.error = 'Failed to load notes: ' + e.message;
-            } finally {
-                this.loading = false;
-            }
-        },
-        setupInfiniteScroll() {
-            const observer = new IntersectionObserver(entries => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        this.fetchItems(true);
-                    }
-                });
-            }, { rootMargin: '100px' });
-
-            this.$watch('items', () => {
-                if (this.hasMore) {
-                    const sentinel = this.$el.querySelector('.sentinel');
-                    if (sentinel) {
-                        observer.observe(sentinel);
-                    }
-                }
-            });
-        },
-        init() {
-            this.setupInfiniteScroll();
-            this.refreshNoteStats();
-        },
-        formatSummary(summary) {
-            if (!summary) return '';
-            // Replace URLs with anchor tags
-            let html = summary.replace(
-                /(https?:\/\/[^\s]+)/g,
-                url => `<a href=&quot;${url}&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;>${url}</a>`
-            );
-            // Replace two consecutive spaces with <br>
-            html = html.replace(/  /g, '<br>');
-            return html;
-        },
-        hashColor(str) {
-            // Simple hash to HSL color
-            let hash = 0;
-            for (let i = 0; i < str.length; i++) {
-                hash = str.charCodeAt(i) + ((hash << 5) - hash);
-            }
-            // Use hash to get hue, keep saturation and lightness fixed for contrast
-            let hue = Math.abs(hash) % 360;
-            return `hsl(${hue}, 60%, 45%)`;
-        },
-        async refreshNoteStats() {
-            try {
-                let resp = await fetch('/api/note?select=summary.count()');
-                let data = await resp.json();
-                this.noteCount = data[0]?.count ?? 0;
-                
-                resp = await fetch('/api/note?select=createdatmillis.max()');
-                data = await resp.json();
-                this.latestTimestamp = data[0]?.max ?? 0;
-            } catch (e) {
-                console.error('Failed to fetch note stats:', e);
-            }
-        },
-
-    }">
-
-    <!-- Loading overlay -->
-    <template x-if="loading">
-        <div class="spinner-overlay">
-            <img src="https://i.gifer.com/ZZ5H.gif" alt="Loading..." width="48" height="48">
+<body x-data="{ activeTab: window.location.hash?.slice(1) || 'search' }" @hashchange.window="activeTab = window.location.hash?.slice(1) || 'search'">
+<header class="header">
+    <div class="header-content">
+        <div class="header-title">
+            <h1>Community Notes</h1>
         </div>
-    </template>
-
-    <div class="info-row">
-        <span x-text="noteCount.toLocaleString() + ' notes, latest: ' + (latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A')"></span>
-        <button @click="refreshNoteStats()" style="padding: 2px 8px; font-size: 0.9em; cursor: pointer; background: #f4f4f4; border: 1px solid #ccc; border-radius: 4px;">Refresh</button>
+        <nav class="tabs" x-data="tabs()">
+            <button 
+                class="tab" 
+                :class="{ 'active': activeTab === 'search' }"
+                @click="setTab('search')"
+            >Search</button>
+            <button 
+                class="tab" 
+                :class="{ 'active': activeTab === 'admin' }"
+                @click="setTab('admin')"
+            >Admin</button>
+        </nav>
     </div>
+</header>
 
-    <div class="search-bar">
-        <div class="search-input-wrapper">
-            <input
-                x-model="search"
-                type="search"
-                placeholder="Search..."
-                @keyup.enter="fetchItems()"
-                x-init="$el.focus()">
-            <button class="clear-btn" @click="search = ''" title="Clear search">✕</button>
-        </div>
-        <button class="search-btn" @click="fetchItems()">Search</button>
-    </div>
+<main class="container">
 
-    <div class="error" x-show="error" x-text="error"></div>
-    <div class="no-results" x-show="!loading && items.length === 0 && !error">
-        No results found.
-    </div>
-    <div x-show="!loading && !error && items.length > 0" x-text="`Query returned ${totalCount} items`"></div>
+    <!-- SEARCH TAB -->
+    <div x-show="activeTab === 'search'" x-data="searchTab()">
 
-    <table x-show="items.length > 0">
-        <thead>
-        <tr>
-            <th>Created At</th>
-            <th>Author ID</th>
-            <th>Note Text</th>
-        </tr>
-        </thead>
-        <tbody>
-        <template x-for="item in items" :key="item.noteid">
-            <tr>
-                <td x-text="new Date(item.createdatmillis).toLocaleString()"></td>
-                <td
-                    class="author-id"
-                    :style="`background: ${hashColor(item.noteauthorparticipantid)}`"
-                    x-text="item.noteauthorparticipantid ? item.noteauthorparticipantid.slice(-4) : ''"
-                ></td>
-                <td class="summary-cell">
-                    <button
-                        class="link-btn"
-                        @click="window.open('https://x.com/i/communitynotes/t/' + item.tweetid, '_blank', 'noopener')"
-                        title="View notes on tweet"
-                    >
-                        🔗
-                    </button>
-                    <button
-                        class="copy-btn"
-                        @click="
-                            navigator.clipboard.writeText(item.summary || '');
-                            item._copied = true;
-                            setTimeout(() => item._copied = false, 1500);
-                        "
-                        title="Copy note text to clipboard"
-                    >
-                        📋
-                    </button>
-                    <span
-                        x-show="item._copied"
-                        style="position: absolute; right: 50px; top: 4px; background: #222; color: #fff; padding: 4px 10px; border-radius: 6px; z-index: 10; font-size: 0.95em; box-shadow: 0 2px 8px rgba(0,0,0,0.15); white-space: nowrap;"
-                        x-transition.opacity
-                        x-text="'Copied!'"
-                    ></span>
-                    <div x-html="formatSummary(item.summary)"></div>
-                </td>
-            </tr>
+        <template x-if="loading">
+            <div class="loading-overlay">
+                <div class="spinner"></div>
+                <span>Loading...</span>
+            </div>
         </template>
-        </tbody>
-    </table>
-    <div class="sentinel"></div>
-</div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-label">Total Notes</span>
+                <span class="stat-value" x-text="noteCount.toLocaleString()"></span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Latest Update</span>
+                <span class="stat-sub" x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A'"></span>
+            </div>
+        </div>
+
+        <div class="search-section">
+            <div class="search-wrapper">
+                <div class="search-input-group">
+                    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <input class="search-input" x-model="search" type="search" placeholder="Search notes..." @keyup.enter="fetchItems()" x-init="$el.focus()">
+                    <button class="search-clear" @click="search = ''; fetchItems();" x-show="search" title="Clear search">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6 6 18M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <button class="btn btn-primary" @click="fetchItems()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    Search
+                </button>
+                <button class="btn btn-secondary" @click="refreshNoteStats()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                        <path d="M3 3v5h5"></path>
+                        <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                        <path d="M16 16h5v5"></path>
+                    </svg>
+                    Refresh
+                </button>
+            </div>
+        </div>
+
+        <div class="error-msg" x-show="error" x-text="error"></div>
+        <div class="results-info" x-show="!loading && !error && items.length > 0" x-text="'Found ' + totalCount.toLocaleString() + ' notes'"></div>
+        
+        <div class="empty-state" x-show="!loading && items.length === 0 && !error">
+            <div class="empty-state-icon">📭</div>
+            <div>No results found</div>
+        </div>
+
+        <div class="notes-list" x-show="items.length > 0">
+            <template x-for="item in items" :key="item.noteid">
+                <article class="note-card">
+                    <div class="note-header">
+                        <div class="note-meta">
+                            <span class="note-date" x-text="new Date(item.createdatmillis).toLocaleString()"></span>
+                            <span class="author-badge" :style="'background: ' + hashColor(item.noteauthorparticipantid)" x-text="item.noteauthorparticipantid?.slice(-4) || ''"></span>
+                        </div>
+                        <div class="note-actions">
+                            <button class="action-btn" @click="window.open('https://x.com/i/communitynotes/t/' + item.tweetid, '_blank', 'noopener')" title="View notes on tweet">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                    <polyline points="15 3 21 3 21 9"></polyline>
+                                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                                </svg>
+                            </button>
+                            <button class="action-btn" :class="{ 'copied': item._copied }" @click="navigator.clipboard.writeText(item.summary || ''); item._copied = true; setTimeout(() => item._copied = false, 1500)" title="Copy note text">
+                                <svg x-show="!item._copied" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                                <svg x-show="item._copied" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="note-content" x-html="formatSummary(item.summary)"></div>
+                </article>
+            </template>
+        </div>
+        <div class="scroll-sentinel"></div>
+    </div>
+
+    <!-- ADMIN TAB -->
+    <div x-show="activeTab === 'admin'" x-data="adminTab()">
+
+        <div class="offline-banner" x-show="!backendOnline">Backend unavailable - Connection lost</div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <span class="stat-label">Total Notes</span>
+                <span class="stat-value" x-text="noteCount.toLocaleString()"></span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Latest Update</span>
+                <span class="stat-sub" x-text="latestTimestamp ? new Date(latestTimestamp).toLocaleString() : 'N/A'"></span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Import Status</span>
+                <span class="badge" :class="statusBadgeClass(importStatus?.status)" x-text="importStatus?.status || 'idle'"></span>
+            </div>
+        </div>
+
+        <div class="import-controls">
+            <button class="btn btn-primary" @click="triggerImport()" x-bind:disabled="importStatus?.status === 'importing' || importStatus?.status === 'downloading'">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Update Notes
+            </button>
+            <button class="btn btn-danger" @click="abortImport()" x-show="importStatus?.status === 'importing' || importStatus?.status === 'downloading'">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="15" y1="9" x2="9" y2="15"></line>
+                    <line x1="9" y1="9" x2="15" y2="15"></line>
+                </svg>
+                Abort
+            </button>
+            <button class="btn btn-secondary" @click="refreshNoteStats(); fetchImportHistory();">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+                    <path d="M16 16h5v5"></path>
+                </svg>
+                Refresh
+            </button>
+        </div>
+
+        <div class="error-msg" x-show="importError" x-text="importError"></div>
+
+        <div class="card">
+            <h2 style="margin-bottom: 1rem;">Import History</h2>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Started</th>
+                            <th>Completed</th>
+                            <th>Files</th>
+                            <th>Status</th>
+                            <th>Download</th>
+                            <th>Import</th>
+                            <th>Error</th>
+                        </tr>
+                    </thead>
+                    <tbody x-show="importHistory.length > 0">
+                        <template x-for="h in importHistory" :key="h.id">
+                            <tr>
+                                <td x-text="new Date(h.started_at).toLocaleString()"></td>
+                                <td x-text="h.status === 'completed' && h.completed_at ? new Date(h.completed_at).toLocaleString() : '-'"></td>
+                                <td>
+                                    <template x-if="h.file_names">
+                                        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                            <template x-for="f in h.file_names.split(',')" :key="f">
+                                                <span style="font-size: 0.8rem; color: var(--text-secondary);" x-text="f"></span>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <span x-show="!h.file_names" style="color: var(--text-muted);">-</span>
+                                </td>
+                                <td><span class="badge" :class="statusBadgeClass(h.status)" x-text="h.status"></span></td>
+                                <td>
+                                    <template x-if="h.status === 'downloading'">
+                                        <span style="color: var(--accent);" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ' - ' + (h.download_percentage ?? 0) + '%'"></span>
+                                    </template>
+                                    <template x-if="(h.status === 'importing' || h.status === 'completed') && h.download_cached">
+                                        <span style="color: var(--text-secondary);" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' (cached)'"></span>
+                                    </template>
+                                    <template x-if="(h.status === 'importing' || h.status === 'completed') && !h.download_cached">
+                                        <span style="color: var(--text-secondary);" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration)"></span>
+                                    </template>
+                                    <span x-show="h.status === 'failed' || h.status === 'idle'" style="color: var(--text-muted);">-</span>
+                                </td>
+                                <td>
+                                    <template x-if="h.status === 'importing'">
+                                        <span style="color: var(--accent);" x-text="(h.rows_processed ?? 0).toLocaleString() + ' / ' + (h.total_rows ? h.total_rows.toLocaleString() : '?') + ' (' + (h.total_rows ? Math.round((h.rows_processed ?? 0) / h.total_rows * 100) : 0) + '%)'"></span>
+                                    </template>
+                                    <template x-if="h.status === 'completed'">
+                                        <span style="color: var(--text-secondary);" x-text="(h.total_rows ?? 0).toLocaleString() + ' rows in ' + formatDuration(h.import_duration)"></span>
+                                    </template>
+                                    <span x-show="h.status === 'idle' || h.status === 'failed' || h.status === 'downloading'" style="color: var(--text-muted);">-</span>
+                                </td>
+                                <td>
+                                    <span x-show="h.error_message" style="color: var(--error);" x-text="h.error_message"></span>
+                                    <span x-show="!h.error_message" style="color: var(--text-muted);">-</span>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                    <tbody x-show="importHistory.length === 0">
+                        <tr>
+                            <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No import history</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</main>
 </body>
 </html>
