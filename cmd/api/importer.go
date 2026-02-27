@@ -307,3 +307,23 @@ func sanitizeImportStatus() {
 
 	logger.Info("Cleared any running import jobs")
 }
+
+func cleanupOldFiles(keepDate string) {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		logger.Warn("Failed to read data directory", "error", err)
+		return
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, keepDate) {
+			path := filepath.Join(dataDir, name)
+			if err := os.Remove(path); err != nil {
+				logger.Warn("Failed to remove old file", "path", path, "error", err)
+			} else {
+				logger.Info("Removed old file", "path", path)
+			}
+		}
+	}
+}

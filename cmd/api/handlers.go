@@ -166,6 +166,11 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if len(files) > 0 {
+			date := strings.Split(files[0].FileName, "-notes-")[0]
+			cleanupOldFiles(date)
+		}
+
 		if isImportAborted(jobID) {
 			setImportFailed(jobID, "Aborted by user")
 			return
