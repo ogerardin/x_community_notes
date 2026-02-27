@@ -103,23 +103,22 @@ h2 { font-size: 1.15rem; }
 
 .tabs {
     display: flex;
-    gap: 0.25rem;
-    background: var(--bg-card);
-    padding: 0.25rem;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
+    gap: 0;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 1.5rem;
 }
 
 .tab {
-    padding: 0.5rem 1.25rem;
+    padding: 0.75rem 1.5rem;
     font-size: 0.9rem;
     font-weight: 500;
     color: var(--text-muted);
     background: transparent;
     border: none;
-    border-radius: var(--radius-sm);
+    border-bottom: 2px solid transparent;
     cursor: pointer;
     transition: all var(--transition);
+    margin-bottom: -1px;
 }
 
 .tab:hover {
@@ -127,8 +126,9 @@ h2 { font-size: 1.15rem; }
 }
 
 .tab.active {
-    color: var(--text-primary);
-    background: var(--accent);
+    color: var(--accent);
+    background: transparent;
+    border-bottom-color: var(--accent);
 }
 
 /* Cards */
