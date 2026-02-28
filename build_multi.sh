@@ -22,6 +22,7 @@ VERSION=$(git describe --tags --exact-match 2>/dev/null || echo "")
 if [ -z "$VERSION" ]; then
   # No exact tag match, only push 'latest'
   echo "No git release tag found, will only push 'latest' tag"
+  VERSION="dev"
   PUSH_LATEST_ONLY=true
 else
   # Remove 'v' prefix if present (e.g., v1.0.0 -> 1.0.0)
@@ -29,6 +30,17 @@ else
   echo "Using git tag version: $VERSION"
   PUSH_LATEST_ONLY=false
 fi
+
+# Extract git SHA and build time
+GIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
+
+echo "Git SHA: $GIT_SHA"
+echo "Build time: $BUILD_TIME"
+
+# Build common arguments
+BUILD_ARGS="--build-arg VERSION=${VERSION} --build-arg GIT_SHA=${GIT_SHA} --build-arg BUILD_TIME=${BUILD_TIME} --build-arg REPOSITORY=${REPOSITORY}"
+LABELS="--label org.opencontainers.image.version=${VERSION} --label org.opencontainers.image.source=${REPOSITORY} --label org.opencontainers.image.revision=${GIT_SHA} --label org.opencontainers.image.created=${BUILD_TIME}"
 
 # Check if buildx builder exists, create if not, otherwise use it
 if ! docker buildx inspect "$BUILDER_NAME" &>/dev/null; then
@@ -48,13 +60,14 @@ fi
 if [ "$PUSH_LATEST_ONLY" = true ]; then
   echo "Building and pushing multi-arch image: $REPOSITORY:latest"
   docker buildx build --platform "$PLATFORMS" \
+    $BUILD_ARGS $LABELS \
     --tag "$REPOSITORY:latest" \
     --file "$DOCKERFILE" . --push
 else
   echo "Building and pushing multi-arch image: $REPOSITORY:$VERSION and $REPOSITORY:latest"
   docker buildx build --platform "$PLATFORMS" \
+    $BUILD_ARGS $LABELS \
     --tag "$REPOSITORY:$VERSION" \
     --tag "$REPOSITORY:latest" \
-    --label "org.opencontainers.image.version=$VERSION" \
     --file "$DOCKERFILE" . --push
 fi

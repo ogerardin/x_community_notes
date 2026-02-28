@@ -1,8 +1,25 @@
 # Build stage
 FROM x-notes-builder AS builder
+ARG VERSION
+ARG GIT_SHA
+ARG BUILD_TIME
 
 # Final stage
-FROM postgres:18-alpine
+FROM postgres:18.3-alpine
+
+ARG VERSION
+ARG GIT_SHA
+ARG BUILD_TIME
+ARG REPOSITORY
+
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="${REPOSITORY}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIME}"
+
+ENV API_VERSION=${VERSION}
+ENV API_GIT_SHA=${GIT_SHA}
+ENV API_BUILD_TIME=${BUILD_TIME}
 
 ARG POSTGRES_HOST_AUTH_METHOD=trust
 ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}

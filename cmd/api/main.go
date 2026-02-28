@@ -132,6 +132,11 @@ func startAutoImporter() {
 	}()
 }
 
+func getVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(GetVersionInfo())
+}
+
 func main() {
 	logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -146,6 +151,7 @@ func main() {
 	sanitizeImportStatus()
 
 	http.HandleFunc("/health", healthCheck)
+	http.HandleFunc("/version", getVersion)
 	http.HandleFunc("GET /imports/{job_id}", getImportByID)
 	http.HandleFunc("POST /imports", createImport)
 	http.HandleFunc("POST /imports/{job_id}/abort", abortImport)
