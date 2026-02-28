@@ -78,6 +78,10 @@ status:
 	@docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "x-notes" || echo "No containers running"
 
 tag-release:
+	@if [ -n "$$(git status --porcelain)" ] && [ "$(FORCE)" != "true" ]; then \
+		echo "Error: Working directory not clean. Commit or stash changes, or use FORCE=true"; \
+		exit 1; \
+	fi
 	@echo "Current version: $(VERSION)"
 	@echo "This will tag, push, and build the dist image."
 	@echo ""
