@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>X/Twitter Community Notes</title>
-    <link rel="stylesheet" href="/styles.css?v=13">
+    <link rel="stylesheet" href="/styles.css?v=14">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>
         document.addEventListener('alpine:init', () => {
@@ -20,6 +20,11 @@
                 noteCount: 0,
                 latestTimestamp: null,
                 importStatus: null,
+                importHistory: [],
+                importError: '',
+                backendOnline: true,
+                importPollInterval: null,
+                schedulerStatus: null,
                 setTab(tab) {
                     this.activeTab = tab;
                     window.location.hash = tab;
@@ -38,17 +43,106 @@
                 async fetchImportStatus() {
                     try {
                         let resp = await fetch('/api/imports/current');
-                        if (resp.ok) {
-                            let data = await resp.json();
-                            this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
-                        }
+                        if (!resp.ok) throw new Error('Failed to fetch import status');
+                        let data = await resp.json();
+                        this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
+                        this.importError = '';
+                        this.backendOnline = true;
+                        await this.fetchImportHistory();
+                        const active = ['importing', 'downloading', 'indexing'].includes(this.importStatus?.status);
+                        if (active) this.startPolling(); else this.stopPolling();
+                    } catch (e) {
+                        this.backendOnline = false;
+                        this.importError = '';
+                    }
+                },
+                async fetchImportHistory() {
+                    try {
+                        let resp = await fetch('/api/imports');
+                        if (!resp.ok) throw new Error('Failed to fetch import history');
+                        this.importHistory = await resp.json() || [];
                     } catch (e) {}
+                },
+                async fetchSchedulerStatus() {
+                    try {
+                        let resp = await fetch('/api/imports/scheduler');
+                        if (resp.ok) this.schedulerStatus = await resp.json();
+                    } catch (e) {}
+                },
+                startPolling() {
+                    if (this.importPollInterval) return;
+                    this.importPollInterval = setInterval(() => this.fetchImportStatus(), 5000);
+                },
+                stopPolling() {
+                    if (this.importPollInterval) {
+                        clearInterval(this.importPollInterval);
+                        this.importPollInterval = null;
+                    }
+                },
+                statusBadgeClass(status) {
+                    switch(status) {
+                        case 'completed': return 'badge-success';
+                        case 'failed': return 'badge-error';
+                        case 'importing':
+                        case 'downloading':
+                        case 'indexing': return 'badge-info';
+                        default: return 'badge-warning';
+                    }
+                },
+                formatDuration(seconds) {
+                    if (seconds === null || seconds === undefined) return '';
+                    const m = Math.floor(seconds / 60);
+                    const s = seconds % 60;
+                    return m > 0 ? (s > 0 ? m + 'm ' + s + 's' : m + 'm') : s + 's';
+                },
+                formatFileSize(bytes) {
+                    if (bytes === null || bytes === undefined) return '';
+                    if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+                    if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
+                    return Math.round(bytes / 1e3) + ' KB';
+                },
+                formatRemainingTime(nextRun) {
+                    if (!nextRun) return '-';
+                    const now = new Date();
+                    const next = new Date(nextRun);
+                    const diffMs = next - now;
+                    if (diffMs <= 0) return 'now';
+                    const mins = Math.floor(diffMs / 60000);
+                    if (mins < 60) return 'in ' + mins + 'm';
+                    const hours = Math.floor(mins / 60);
+                    const remainingMins = mins % 60;
+                    return 'in ' + (remainingMins > 0 ? hours + 'h ' + remainingMins + 'm' : hours + 'h');
+                },
+                async triggerImport() {
+                    try {
+                        this.importError = '';
+                        if (['importing', 'downloading', 'indexing'].includes(this.importStatus?.status)) {
+                            this.importError = 'Update already in progress';
+                            return;
+                        }
+                        let resp = await fetch('/api/imports/create', { method: 'POST' });
+                        if (!resp.ok) throw new Error('Failed to trigger update: ' + resp.status);
+                        await this.fetchImportStatus();
+                    } catch (e) {
+                        this.importError = e.message;
+                    }
+                },
+                async abortImport() {
+                    try {
+                        if (!this.importStatus?.job_id) return;
+                        let resp = await fetch('/api/imports/' + this.importStatus.job_id, { method: 'DELETE' });
+                        if (!resp.ok) throw new Error('Failed to abort update');
+                        await this.fetchImportStatus();
+                    } catch (e) {
+                        this.importError = e.message;
+                    }
                 },
                 init() {
                     this.refreshNoteStats();
                     this.fetchImportStatus();
+                    this.fetchSchedulerStatus();
                     setInterval(() => this.refreshNoteStats(), 30000);
-                    setInterval(() => this.fetchImportStatus(), 5000);
+                    setInterval(() => this.fetchSchedulerStatus(), 60000);
                     window.addEventListener('hashchange', () => {
                         this.activeTab = window.location.hash?.slice(1) || 'search';
                     });
@@ -125,127 +219,7 @@
                 },
             }));
 
-            Alpine.data('adminTab', () => ({
-                importStatus: null,
-                importError: '',
-                backendOnline: true,
-                importPollInterval: null,
-                importHistory: [],
-                schedulerStatus: null,
-                formatDuration(seconds) {
-                    if (seconds === null || seconds === undefined) return '';
-                    const m = Math.floor(seconds / 60);
-                    const s = seconds % 60;
-                    return m > 0 ? (s > 0 ? m + 'm ' + s + 's' : m + 'm') : s + 's';
-                },
-                formatFileSize(bytes) {
-                    if (bytes === null || bytes === undefined) return '';
-                    if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
-                    if (bytes >= 1e6) return Math.round(bytes / 1e6) + ' MB';
-                    return Math.round(bytes / 1e3) + ' KB';
-                },
-                formatRemainingTime(nextRun) {
-                    if (!nextRun) return '-';
-                    const now = new Date();
-                    const next = new Date(nextRun);
-                    const diffMs = next - now;
-                    if (diffMs <= 0) return 'now';
-                    const mins = Math.floor(diffMs / 60000);
-                    if (mins < 60) return 'in ' + mins + 'm';
-                    const hours = Math.floor(mins / 60);
-                    const remainingMins = mins % 60;
-                    return 'in ' + (remainingMins > 0 ? hours + 'h ' + remainingMins + 'm' : hours + 'h');
-                },
-                async fetchImportStatus() {
-                    try {
-                        let resp = await fetch('/api/imports/current');
-                        if (!resp.ok) throw new Error('Failed to fetch import status');
-                        let data = await resp.json();
-                        this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
-                        this.importError = '';
-                        this.backendOnline = true;
-                        this.fetchImportHistory();
-                        if (this.importStatus?.status === 'importing' || this.importStatus?.status === 'downloading') {
-                            this.startPolling();
-                        } else {
-                            this.stopPolling();
-                        }
-                    } catch (e) {
-                        this.backendOnline = false;
-                        this.importError = '';
-                    }
-                },
-                async fetchImportHistory() {
-                    try {
-                        let resp = await fetch('/api/imports');
-                        if (!resp.ok) throw new Error('Failed to fetch import history');
-                        this.importHistory = await resp.json() || [];
-                    } catch (e) {}
-                },
-                async fetchSchedulerStatus() {
-                    try {
-                        let resp = await fetch('/api/imports/scheduler');
-                        if (resp.ok) {
-                            this.schedulerStatus = await resp.json();
-                        }
-                    } catch (e) {}
-                },
-                async triggerImport() {
-                    try {
-                        this.importError = '';
-                        if (this.importStatus?.status === 'importing' || this.importStatus?.status === 'downloading') {
-                            this.importError = 'Update already in progress';
-                            return;
-                        }
-                        let resp = await fetch('/api/imports/create', { method: 'POST' });
-                        if (!resp.ok) throw new Error('Failed to trigger update: ' + resp.status);
-                        await this.fetchImportStatus();
-                        await this.fetchImportHistory();
-                    } catch (e) {
-                        this.importError = e.message;
-                    }
-                },
-                async abortImport() {
-                    try {
-                        if (!this.importStatus?.job_id) return;
-                        let resp = await fetch('/api/imports/' + this.importStatus.job_id, { method: 'DELETE' });
-                        if (!resp.ok) throw new Error('Failed to abort update');
-                        await this.fetchImportStatus();
-                        await this.fetchImportHistory();
-                    } catch (e) {
-                        this.importError = e.message;
-                    }
-                },
-                startPolling() {
-                    if (this.importPollInterval) return;
-                    this.importPollInterval = setInterval(() => {
-                        this.fetchImportStatus();
-                        this.fetchImportHistory();
-                    }, 30000);
-                },
-                stopPolling() {
-                    if (this.importPollInterval) {
-                        clearInterval(this.importPollInterval);
-                        this.importPollInterval = null;
-                    }
-                },
-                statusBadgeClass(status) {
-                    switch(status) {
-                        case 'completed': return 'badge-success';
-                        case 'failed': return 'badge-error';
-                        case 'importing':
-                        case 'downloading':
-                        case 'indexing': return 'badge-info';
-                        default: return 'badge-warning';
-                    }
-                },
-                init() {
-                    this.fetchImportStatus();
-                    this.fetchImportHistory();
-                    this.fetchSchedulerStatus();
-                    setInterval(() => this.fetchSchedulerStatus(), 60000);
-                },
-            }));
+            Alpine.data('adminTab', () => ({}));
         });
     </script>
 </head>
@@ -254,11 +228,11 @@
     <div class="header-content">
         <div class="header-title">
             <h1>X/Twitter Searchable Community Notes Database</h1>
-            <span class="header-stats" x-show="importStatus?.status === 'importing' || importStatus?.status === 'downloading'" x-cloak style="color: var(--accent);">
+            <span class="header-stats" x-show="['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak style="color: var(--accent);">
                 <svg class="spinner" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4"/></svg>
-                <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?'))"></span>)
+                <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : importStatus?.status === 'indexing' ? (importStatus?.index_blocks_total ? Math.round((importStatus?.index_blocks_done ?? 0) / importStatus.index_blocks_total * 100) + '%' : '...') : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?'))"></span>)
             </span>
-            <span class="header-stats" x-show="!importStatus || (importStatus?.status !== 'importing' && importStatus?.status !== 'downloading')" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes<template x-if="latestTimestamp">, Latest: <span x-text="new Date(latestTimestamp).toLocaleDateString()"></span></template>)</span>
+            <span class="header-stats" x-show="!['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes<template x-if="latestTimestamp">, Latest: <span x-text="new Date(latestTimestamp).toLocaleDateString()"></span></template>)</span>
         </div>
         <nav class="tabs">
             <button 
@@ -354,7 +328,7 @@
     </div>
 
     <!-- ADMIN TAB -->
-    <div x-show="activeTab === 'admin'" x-data="adminTab()">
+    <div x-show="activeTab === 'admin'">
 
         <div class="offline-banner" x-show="!backendOnline">Backend unavailable - Connection lost</div>
 
@@ -382,7 +356,7 @@
         </div>
 
         <div class="import-controls">
-            <button class="btn btn-primary" @click="triggerImport()" x-bind:disabled="importStatus?.status === 'importing' || importStatus?.status === 'downloading'">
+            <button class="btn btn-primary" @click="triggerImport()" x-bind:disabled="['importing','downloading','indexing'].includes(importStatus?.status)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                     <polyline points="7 10 12 15 17 10"></polyline>
@@ -405,16 +379,16 @@
         <div class="card">
             <h2 style="margin-bottom: 1rem;">Update History</h2>
             <div class="table-wrapper">
-                <table>
+                <table class="history-table">
                     <thead>
                         <tr>
                             <th>Started</th>
                             <th>Completed</th>
                             <th>Files</th>
-                            <th>Status</th>
                             <th>Download</th>
                             <th>Import</th>
-                            <th>Error</th>
+                            <th>Indexing</th>
+                            <th>Status</th>
                         </tr>
                     </thead>
                     <tbody x-show="importHistory.length > 0">
@@ -432,31 +406,44 @@
                                     </template>
                                     <span x-show="!h.file_names" style="color: var(--text-muted);">-</span>
                                 </td>
-                                <td><span class="badge" :class="statusBadgeClass(h.status)" x-text="h.status"></span></td>
                                 <td>
                                     <template x-if="h.status === 'downloading'">
-                                        <span style="color: var(--accent);" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ' - ' + (h.download_percentage ?? 0) + '%'"></span>
+                                        <span style="color: var(--accent);" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ' — ' + (h.download_percentage ?? 0) + '%'"></span>
                                     </template>
-                                    <template x-if="(h.status === 'importing' || h.status === 'completed') && h.download_cached">
+                                    <template x-if="h.status !== 'downloading' && h.download_cached">
                                         <span style="color: var(--text-secondary);" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' (cached)'"></span>
                                     </template>
-                                    <template x-if="(h.status === 'importing' || h.status === 'completed') && !h.download_cached">
-                                        <span style="color: var(--text-secondary);" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration)"></span>
+                                    <template x-if="h.status !== 'downloading' && !h.download_cached && h.download_duration !== null">
+                                        <span style="color: var(--text-secondary);" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) + (h.download_speed ? ' ' + h.download_speed : '')"></span>
                                     </template>
-                                    <span x-show="h.status === 'failed' || h.status === 'idle'" style="color: var(--text-muted);">-</span>
+                                    <span x-show="h.status !== 'downloading' && !h.download_cached && h.download_duration === null" style="color: var(--text-muted);">-</span>
                                 </td>
                                 <td>
                                     <template x-if="h.status === 'importing'">
                                         <span style="color: var(--accent);" x-text="(h.rows_processed ?? 0).toLocaleString() + ' / ' + (h.total_rows ? h.total_rows.toLocaleString() : '?') + ' (' + (h.total_rows ? Math.round((h.rows_processed ?? 0) / h.total_rows * 100) : 0) + '%)'"></span>
                                     </template>
-                                    <template x-if="h.status === 'completed'">
+                                    <template x-if="h.status === 'completed' || h.status === 'indexing'">
                                         <span style="color: var(--text-secondary);" x-text="(h.total_rows ?? 0).toLocaleString() + ' rows in ' + formatDuration(h.import_duration)"></span>
                                     </template>
                                     <span x-show="h.status === 'idle' || h.status === 'failed' || h.status === 'downloading'" style="color: var(--text-muted);">-</span>
                                 </td>
                                 <td>
-                                    <span x-show="h.error_message" style="color: var(--error);" x-text="h.error_message"></span>
-                                    <span x-show="!h.error_message" style="color: var(--text-muted);">-</span>
+                                    <template x-if="h.status === 'indexing'">
+                                        <div class="progress-bar-wrap">
+                                            <span style="color: var(--accent); font-size: 0.75rem;" x-text="h.index_blocks_total ? Math.round((h.index_blocks_done ?? 0) / h.index_blocks_total * 100) + '% — ' + (h.index_phase ?? 'building indexes') : (h.index_phase ?? 'building indexes...')"></span>
+                                            <div class="progress-bar">
+                                                <div class="progress-bar-fill" :style="'width:' + (h.index_blocks_total ? Math.round((h.index_blocks_done ?? 0) / h.index_blocks_total * 100) : 100) + '%'"></div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="h.status === 'completed' && h.indexing_started_at">
+                                        <span style="color: var(--text-secondary);" x-text="formatDuration(Math.round((new Date(h.completed_at) - new Date(h.indexing_started_at)) / 1000))"></span>
+                                    </template>
+                                    <span x-show="!h.indexing_started_at && h.status !== 'indexing'" style="color: var(--text-muted);">-</span>
+                                </td>
+                                <td>
+                                    <span class="badge" :class="statusBadgeClass(h.status)" x-text="h.status"></span>
+                                    <span x-show="h.error_message" style="color: var(--error); display: block; margin-top: 0.25rem; font-size: 0.75rem;" x-text="h.error_message"></span>
                                 </td>
                             </tr>
                         </template>

@@ -65,7 +65,7 @@ build-dist: build-builder
 compose-up: build-builder
 	@docker volume create x-notes-db 2>/dev/null || true
 	@docker stop $(CONTAINER_NAME) 2>/dev/null && docker rm $(CONTAINER_NAME) || true
-	@docker compose up -d --build
+	@BUILDX_BUILDER=default docker compose up -d --build
 
 compose-down:
 	@docker compose down

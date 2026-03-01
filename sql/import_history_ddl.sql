@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS import_history (
     started_at TIMESTAMP NOT NULL,
     completed_at TIMESTAMP,
     total_rows INT,
-    status TEXT CHECK (status IN ('importing', 'completed', 'failed', 'idle', 'downloading')) NOT NULL,
+    status TEXT CHECK (status IN ('importing', 'completed', 'failed', 'idle', 'downloading', 'indexing')) NOT NULL,
     error_message TEXT,
     download_percentage INT,
     download_speed TEXT,
@@ -21,7 +21,11 @@ CREATE TABLE IF NOT EXISTS import_history (
     current_file_index INT,
     files_processed INT,
     file_names TEXT,
-    data_date DATE
+    data_date DATE,
+    indexing_started_at TIMESTAMP,
+    index_phase TEXT,
+    index_blocks_done INT,
+    index_blocks_total INT
 );
 
 CREATE INDEX IF NOT EXISTS idx_import_history_started_at ON import_history(started_at DESC);

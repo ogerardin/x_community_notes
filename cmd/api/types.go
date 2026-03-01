@@ -25,6 +25,10 @@ type HistoryEntry struct {
 	CurrentFileIndex   *int       `json:"current_file_index,omitempty"`
 	FilesProcessed     *int       `json:"files_processed,omitempty"`
 	FileNames          *string    `json:"file_names,omitempty"`
+	IndexingStartedAt  *time.Time `json:"indexing_started_at,omitempty"`
+	IndexPhase         *string    `json:"index_phase,omitempty"`
+	IndexBlocksDone    *int       `json:"index_blocks_done,omitempty"`
+	IndexBlocksTotal   *int       `json:"index_blocks_total,omitempty"`
 }
 
 type ImportStatus struct {

@@ -45,14 +45,19 @@ func getImportByID(w http.ResponseWriter, r *http.Request) {
 	var currentFileIndex sql.NullInt64
 	var filesProcessed sql.NullInt64
 	var fileNames sql.NullString
+	var indexingStartedAt sql.NullTime
+	var indexPhase sql.NullString
+	var indexBlocksDone sql.NullInt64
+	var indexBlocksTotal sql.NullInt64
 
 	err := db.QueryRowContext(ctx, `
-		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message, 
+		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message,
 		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_size,
-		       total_files, current_file_index, files_processed, file_names
-		FROM import_history 
+		       total_files, current_file_index, files_processed, file_names,
+		       indexing_started_at, index_phase, index_blocks_done, index_blocks_total
+		FROM import_history
 		WHERE job_id = $1
-	`, jobID).Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames)
+	`, jobID).Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames, &indexingStartedAt, &indexPhase, &indexBlocksDone, &indexBlocksTotal)
 
 	if err == sql.ErrNoRows {
 		writeProblem(w, http.StatusNotFound, "Not Found", "Import job not found")
@@ -77,6 +82,10 @@ func getImportByID(w http.ResponseWriter, r *http.Request) {
 	h.CurrentFileIndex = nullInt64ToIntPtr(currentFileIndex)
 	h.FilesProcessed = nullInt64ToIntPtr(filesProcessed)
 	h.FileNames = nullStringToStrPtr(fileNames)
+	h.IndexingStartedAt = nullTimeToTimePtr(indexingStartedAt)
+	h.IndexPhase = nullStringToStrPtr(indexPhase)
+	h.IndexBlocksDone = nullInt64ToIntPtr(indexBlocksDone)
+	h.IndexBlocksTotal = nullInt64ToIntPtr(indexBlocksTotal)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(h)
@@ -283,7 +292,29 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 
 		db.ExecContext(ctx, `SET synchronous_commit = on`)
 
-		db.ExecContext(ctx, `UPDATE import_history SET status = 'indexing' WHERE job_id = $1`, jobID)
+		go db.ExecContext(context.Background(), `UPDATE import_history SET status = 'indexing', indexing_started_at = NOW() WHERE job_id = $1`, jobID)
+
+		indexDone := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-indexDone:
+					return
+				case <-time.After(2 * time.Second):
+					var phase string
+					var blocksDone, blocksTotal int
+					err := db.QueryRowContext(context.Background(), `
+						SELECT COALESCE(phase,''), COALESCE(blocks_done,0), COALESCE(blocks_total,0)
+						FROM pg_stat_progress_create_index LIMIT 1`).Scan(&phase, &blocksDone, &blocksTotal)
+					if err == nil {
+						db.ExecContext(context.Background(), `
+							UPDATE import_history SET index_phase = $1, index_blocks_done = $2, index_blocks_total = $3
+							WHERE job_id = $4`, phase, blocksDone, blocksTotal, jobID)
+					}
+				}
+			}
+		}()
+
 		for _, idxSQL := range []string{
 			`CREATE INDEX idx3yl33mmhbcw582lic7c7fqqu4 ON note USING btree (createdatmillis)`,
 			`CREATE INDEX idxovqwtw36x36lo9smq4lbxjcps ON note USING btree (noteauthorparticipantid)`,
@@ -291,10 +322,13 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 			`CREATE INDEX ts_idx ON note USING gin (summary_ts)`,
 		} {
 			if _, err := db.ExecContext(ctx, idxSQL); err != nil {
+				close(indexDone)
 				setImportFailed(jobID, "failed to rebuild index: "+err.Error())
 				return
 			}
 		}
+
+		close(indexDone)
 
 		var importDuration int
 		err = db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM (NOW() - import_started_at))::INTEGER FROM import_history WHERE job_id = $1`, jobID).Scan(&importDuration)
@@ -305,12 +339,12 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 		var dataDate string
 		if len(files) > 0 {
 			dataDate = strings.Split(files[0].FileName, "-notes-")[0]
-			dataDate = fmt.Sprintf("20%s-%s-%s", dataDate[0:2], dataDate[2:4], dataDate[4:6])
 		}
 
 		_, err = db.ExecContext(ctx, `UPDATE import_history SET status = 'completed', total_rows = $1, completed_at = NOW(), import_duration = $2, data_date = $4 WHERE job_id = $3`, totalRows, importDuration, jobID, dataDate)
 		if err != nil {
-			logger.Warn("Failed to update status", "error", err)
+			setImportFailed(jobID, "failed to mark import completed: "+err.Error())
+			return
 		}
 
 		logger.Info("Import completed", "rows", totalRows, "files", totalFiles)
