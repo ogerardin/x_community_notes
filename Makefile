@@ -135,7 +135,8 @@ oci-status:
 	$(call oci_exec,ps --filter name=$(CONTAINER_NAME))
 
 oci-start:
-	$(call oci_exec,run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data --mount type=volume,source=x-notes-data,target=/home/data $(REPOSITORY):latest)
+	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
+	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data --mount type=volume,source=x-notes-data,target=/home/data $(REPOSITORY):latest"
 
 oci-stop:
 	$(call oci_exec,stop $(CONTAINER_NAME))
