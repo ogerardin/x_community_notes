@@ -46,6 +46,9 @@ COPY <<EOF postgrest.conf
 db-uri = "postgres://postgres@localhost:5432/postgres"
 db-anon-role = "postgres"
 db-aggregates-enabled = true
+db-pool = 20
+db-pool-max = 20
+db-pool-min = 5
 EOF
 
 # Add the static files for the web interface

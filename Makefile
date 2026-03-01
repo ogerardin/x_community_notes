@@ -1,4 +1,4 @@
-.PHONY: help build-builder build-api build-dist up down logs run push clean status tag-release update-oci oci-status oci-start oci-stop oci-restart oci-logs oci-pull
+.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status tag-release oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs
 
 # Variables
 CONTAINER_NAME := x-notes
@@ -17,30 +17,37 @@ VERSION := $(shell VERSION=$$(git describe --tags --exact-match 2>/dev/null | se
 GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
 
+# OCI helper: executes docker command on OCI instance
+define oci_exec
+@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
+ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker $(1)"
+endef
+
 # Build arguments
 BUILD_ARGS := --build-arg VERSION=$(VERSION) --build-arg GIT_SHA=$(GIT_SHA) --build-arg BUILD_TIME=$(BUILD_TIME) --build-arg REPOSITORY=$(REPOSITORY)
 LABELS := --label org.opencontainers.image.version=$(VERSION) --label org.opencontainers.image.source=$(REPOSITORY) --label org.opencontainers.image.revision=$(GIT_SHA) --label org.opencontainers.image.created=$(BUILD_TIME)
 
 help:
 	@echo "Available targets:"
-	@echo "  build-builder  - Build shared Go builder image"
+	@echo "  build-builder   - Build shared Go builder image"
 	@echo "  build-api      - Build API image for compose"
 	@echo "  build-dist     - Build single-container image"
-	@echo "  up             - Start compose services"
-	@echo "  down           - Stop compose services"
-	@echo "  logs           - Follow compose logs"
+	@echo "  compose-up     - Start compose services"
+	@echo "  compose-down   - Stop compose services"
+	@echo "  compose-logs   - Follow compose logs"
 	@echo "  run            - Build and run single container"
 	@echo "  push           - Build and push to Docker Hub"
 	@echo "  clean          - Remove all containers"
 	@echo "  status         - Show running containers"
-	@echo "  tag-release   - Prompt for version, git tag, push, and build"
-	@echo "  update-oci   - Update image on OCI instance (uses OCI_TAG or VERSION)"
-	@echo "  oci-status   - Check container status on OCI"
-	@echo "  oci-start    - Start container on OCI"
-	@echo "  oci-stop     - Stop container on OCI"
-	@echo "  oci-restart  - Restart container on OCI"
-	@echo "  oci-logs     - View container logs on OCI"
-	@echo "  oci-pull     - Pull latest image on OCI"
+	@echo "  tag-release    - Prompt for version, git tag, push, and build"
+	@echo "  oci-update    - Update image on OCI instance (uses OCI_TAG or VERSION)"
+	@echo "  oci-status    - Check container status on OCI"
+	@echo "  oci-start     - Start container on OCI"
+	@echo "  oci-stop      - Stop container on OCI"
+	@echo "  oci-restart   - Restart container on OCI"
+	@echo "  oci-logs      - View container logs on OCI"
+	@echo "  oci-pull      - Pull latest image on OCI"
+	@echo "  list-releases - List release tags"
 	@echo ""
 	@echo "Version: $(VERSION)"
 	@echo "Git SHA: $(GIT_SHA)"
@@ -55,16 +62,21 @@ build-api: build-builder
 build-dist: build-builder
 	@docker build -t $(DOCKER_DIST) -f Dockerfile-dist $(BUILD_ARGS) $(LABELS) .
 
-up: build-builder
+compose-up: build-builder
 	@docker volume create x-notes-db 2>/dev/null || true
 	@docker stop $(CONTAINER_NAME) 2>/dev/null && docker rm $(CONTAINER_NAME) || true
 	@docker compose up -d --build
 
-down:
+compose-down:
 	@docker compose down
 
-logs:
+compose-logs:
 	@$(if $(filter single,$(MODE)),docker logs -f $(CONTAINER_NAME),docker compose logs -f)
+
+# Aliases for backwards compatibility
+up: compose-up
+down: compose-down
+logs: compose-logs
 
 run: build-dist
 	@docker compose down 2>/dev/null || true
@@ -113,30 +125,33 @@ tag-release:
 		echo "Building..."; \
 		make build-dist'
 
-update-oci:
+oci-update:
 	@TAG="$(VERSION)"; \
 	if [ -n "$(OCI_TAG)" ]; then TAG="$(OCI_TAG)"; fi; \
 	echo "Updating OCI instance to $(REPOSITORY):$$TAG"; \
 	./update_image_oci.sh "$$TAG"
 
 oci-status:
-	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
-	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker ps --filter name=$(CONTAINER_NAME)"
+	$(call oci_exec,ps --filter name=$(CONTAINER_NAME))
 
 oci-start:
-	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
-	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data $(REPOSITORY):latest"
+	$(call oci_exec,run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data --mount type=volume,source=x-notes-data,target=/home/data $(REPOSITORY):latest)
 
 oci-stop:
-	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
-	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker stop $(CONTAINER_NAME)"
+	$(call oci_exec,stop $(CONTAINER_NAME))
 
 oci-restart: oci-stop oci-start
 
 oci-logs:
-	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
-	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker logs -f $(CONTAINER_NAME)"
+	$(call oci_exec,logs -f $(CONTAINER_NAME))
 
 oci-pull:
-	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
-	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker pull $(REPOSITORY):latest"
+	$(call oci_exec,pull $(REPOSITORY):latest)
+
+oci-prune:
+	$(call oci_exec,container prune -f)
+	$(call oci_exec,image prune -a -f)
+	$(call oci_exec,volume prune -f)
+
+list-releases:
+	@git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -20

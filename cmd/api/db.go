@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
 
 var (
@@ -23,19 +23,15 @@ func initDBWithRetry(maxRetries int, delay time.Duration) error {
 
 	var err error
 	for i := 0; i < maxRetries; i++ {
-		connector, err := pq.NewConnector(dsn)
+		db, err = sql.Open("postgres", dsn)
 		if err != nil {
 			time.Sleep(delay)
 			continue
 		}
 
-		connectorWithNotice := pq.ConnectorWithNoticeHandler(connector, func(err *pq.Error) {
-			if err != nil {
-				logger.Info("Postgres Notice", "severity", err.Severity, "message", err.Message, "code", err.Code)
-			}
-		})
-
-		db = sql.OpenDB(connectorWithNotice)
+		db.SetMaxOpenConns(3)
+		db.SetMaxIdleConns(1)
+		db.SetConnMaxLifetime(5 * time.Minute)
 
 		if err = db.Ping(); err != nil {
 			time.Sleep(delay)
