@@ -220,7 +220,7 @@
                     this.importPollInterval = setInterval(() => {
                         this.fetchImportStatus();
                         this.fetchImportHistory();
-                    }, 2000);
+                    }, 30000);
                 },
                 stopPolling() {
                     if (this.importPollInterval) {

@@ -25,6 +25,7 @@ ARG POSTGRES_HOST_AUTH_METHOD=trust
 ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}
 ENV POSTGREST_VERSION=14.5
 ENV HOMEDIR=/home
+ENV POSTGRES_SUPERUSER_RESERVED_CONNECTIONS=3
 
 RUN apk add --no-cache curl nginx unzip
 
@@ -46,9 +47,9 @@ COPY <<EOF postgrest.conf
 db-uri = "postgres://postgres@localhost:5432/postgres"
 db-anon-role = "postgres"
 db-aggregates-enabled = true
-db-pool = 20
-db-pool-max = 20
-db-pool-min = 5
+db-pool = 50
+db-pool-max = 50
+db-pool-min = 10
 EOF
 
 # Add the static files for the web interface
