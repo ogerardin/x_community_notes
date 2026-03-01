@@ -25,6 +25,7 @@
                     window.location.hash = tab;
                 },
                 async refreshNoteStats() {
+                    if (['downloading', 'importing', 'indexing'].includes(this.importStatus?.status)) return;
                     try {
                         let resp = await fetch('/api/note?select=summary.count()');
                         let data = await resp.json();
@@ -232,8 +233,9 @@
                     switch(status) {
                         case 'completed': return 'badge-success';
                         case 'failed': return 'badge-error';
-                        case 'importing': 
-                        case 'downloading': return 'badge-info';
+                        case 'importing':
+                        case 'downloading':
+                        case 'indexing': return 'badge-info';
                         default: return 'badge-warning';
                     }
                 },
@@ -388,7 +390,7 @@
                 </svg>
                 Update Notes
             </button>
-            <button class="btn btn-danger" @click="abortImport()" x-show="importStatus?.status === 'importing' || importStatus?.status === 'downloading'">
+            <button class="btn btn-danger" @click="abortImport()" x-show="importStatus?.status === 'importing' || importStatus?.status === 'downloading'" :disabled="importStatus?.status === 'indexing'">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="15" y1="9" x2="9" y2="15"></line>

@@ -26,6 +26,8 @@ ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}
 ENV POSTGREST_VERSION=14.5
 ENV HOMEDIR=/home
 ENV POSTGRES_SUPERUSER_RESERVED_CONNECTIONS=3
+ENV POSTGRES_MAINTENANCE_WORK_MEM=96MB
+ENV POSTGRES_WORK_MEM=16MB
 
 RUN apk add --no-cache curl nginx unzip
 
@@ -74,7 +76,7 @@ VOLUME ["$HOMEDIR/data"]
 # The script starts cron, Postgres, PostgREST, Nginx, and the API server
 COPY <<EOF run.sh
 /usr/sbin/crond -L /var/log/crond.log &
-/usr/local/bin/docker-entrypoint.sh postgres &
+/usr/local/bin/docker-entrypoint.sh postgres -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM} -c work_mem=${POSTGRES_WORK_MEM} &
 until pg_isready -q; do sleep 1; done
 /usr/local/bin/postgrest ${HOMEDIR}/postgrest.conf &
 /usr/local/bin/api-server &

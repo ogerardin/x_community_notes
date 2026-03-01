@@ -210,6 +210,12 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		_, err = db.ExecContext(ctx, `DROP INDEX IF EXISTS ts_idx, idx3yl33mmhbcw582lic7c7fqqu4, idxovqwtw36x36lo9smq4lbxjcps, idxu0f5st3d4b4c55eh9kqyd3yk`)
+		if err != nil {
+			setImportFailed(jobID, "failed to drop indexes: "+err.Error())
+			return
+		}
+
 		_, err = db.ExecContext(ctx, `TRUNCATE note`)
 		if err != nil {
 			setImportFailed(jobID, "failed to truncate table: "+err.Error())
@@ -239,6 +245,12 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 
+		if _, err = db.ExecContext(ctx, `SET synchronous_commit = off`); err != nil {
+			close(done)
+			setImportFailed(jobID, "failed to set synchronous_commit: "+err.Error())
+			return
+		}
+
 		for i, f := range files {
 			if isImportAborted(jobID) {
 				close(done)
@@ -258,20 +270,31 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 			rowsAffected, _ := res.RowsAffected()
 			logger.Info("COPY command output", "file", f.FileName, "rows_affected", rowsAffected)
 
-			var count int
-			err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM note`).Scan(&count)
-			if err == nil {
-				totalRows = count
-				mu.Lock()
-				cumulativeRows = count
-				mu.Unlock()
-			}
+			mu.Lock()
+			cumulativeRows += int(rowsAffected)
+			totalRows = cumulativeRows
+			mu.Unlock()
 
 			db.ExecContext(ctx, `UPDATE import_history SET files_processed = $1 WHERE job_id = $2`, i+1, jobID)
 			logger.Info("File imported", "file", f.FileName, "current", i+1, "total", totalFiles)
 		}
 
 		close(done)
+
+		db.ExecContext(ctx, `SET synchronous_commit = on`)
+
+		db.ExecContext(ctx, `UPDATE import_history SET status = 'indexing' WHERE job_id = $1`, jobID)
+		for _, idxSQL := range []string{
+			`CREATE INDEX idx3yl33mmhbcw582lic7c7fqqu4 ON note USING btree (createdatmillis)`,
+			`CREATE INDEX idxovqwtw36x36lo9smq4lbxjcps ON note USING btree (noteauthorparticipantid)`,
+			`CREATE INDEX idxu0f5st3d4b4c55eh9kqyd3yk ON note USING btree (tweetid)`,
+			`CREATE INDEX ts_idx ON note USING gin (summary_ts)`,
+		} {
+			if _, err := db.ExecContext(ctx, idxSQL); err != nil {
+				setImportFailed(jobID, "failed to rebuild index: "+err.Error())
+				return
+			}
+		}
 
 		var importDuration int
 		err = db.QueryRowContext(ctx, `SELECT EXTRACT(EPOCH FROM (NOW() - import_started_at))::INTEGER FROM import_history WHERE job_id = $1`, jobID).Scan(&importDuration)
