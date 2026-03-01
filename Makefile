@@ -1,4 +1,4 @@
-.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status oci-deploy oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs
+.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status release oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs
 
 # Variables
 CONTAINER_NAME := x-notes
@@ -39,7 +39,7 @@ help:
 	@echo "  push           - Build and push to Docker Hub"
 	@echo "  clean          - Remove all containers"
 	@echo "  status         - Show running containers"
-	@echo "  oci-deploy     - Version, build, push, and optionally deploy to OCI"
+	@echo "  release        - Version, build, push, and optionally deploy to OCI"
 	@echo "  oci-update    - Update image on OCI instance (uses OCI_TAG or VERSION)"
 	@echo "  oci-status    - Check container status on OCI"
 	@echo "  oci-start     - Start container on OCI"
@@ -96,7 +96,7 @@ status:
 	@echo "Mode: $(MODE)"
 	@docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "x-notes" || echo "No containers running"
 
-oci-deploy:
+release:
 	@if [ -n "$$(git status --porcelain)" ] && [ "$(FORCE)" != "true" ]; then \
 		echo "Error: Working directory not clean. Commit or stash changes, or use FORCE=true"; \
 		exit 1; \
