@@ -1,0 +1,11 @@
+START CONTAINER
+ sudo docker run --detach --name x-notes --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data ogerardin/x-notes:latest
+
+GRAB LATEST NOTES
+ sudo docker exec -it x-notes /home/grab_notes.sh
+ sudo docker exec -it x-notes psql -U postgres -d postgres -c "SELECT * FROM pg_stat_progress_copy;"
+
+FORCE UPDATE IMAGE
+ sudo docker pull ogerardin/x-notes:latest
+ sudo docker stop x-notes
+ sudo docker rm x-notes
