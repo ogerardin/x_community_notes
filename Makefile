@@ -1,4 +1,4 @@
-.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status tag-release oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs
+.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status oci-deploy oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs
 
 # Variables
 CONTAINER_NAME := x-notes
@@ -39,7 +39,7 @@ help:
 	@echo "  push           - Build and push to Docker Hub"
 	@echo "  clean          - Remove all containers"
 	@echo "  status         - Show running containers"
-	@echo "  tag-release    - Prompt for version, git tag, push, and build"
+	@echo "  oci-deploy     - Version, build, push, and optionally deploy to OCI"
 	@echo "  oci-update    - Update image on OCI instance (uses OCI_TAG or VERSION)"
 	@echo "  oci-status    - Check container status on OCI"
 	@echo "  oci-start     - Start container on OCI"
@@ -96,34 +96,45 @@ status:
 	@echo "Mode: $(MODE)"
 	@docker ps --format "table {{.Names}}\t{{.Status}}" | grep -E "x-notes" || echo "No containers running"
 
-tag-release:
+oci-deploy:
 	@if [ -n "$$(git status --porcelain)" ] && [ "$(FORCE)" != "true" ]; then \
 		echo "Error: Working directory not clean. Commit or stash changes, or use FORCE=true"; \
 		exit 1; \
 	fi
 	@echo "Current version: $(VERSION)"
-	@echo "This will tag, push, and build the dist image."
-	@echo ""
-	@$(SHELL) -c 'read -p "Enter version (or press Enter for suggested next patch): " NEW_VERSION; \
+	@$(SHELL) -c '\
+		read -p "Enter version (or press Enter for suggested next patch): " NEW_VERSION; \
 		if [ -z "$$NEW_VERSION" ]; then \
-			if [ "$(VERSION)" = "dev" ]; then \
-				NEW_VERSION="0.0.1"; \
-			else \
-				NEW_VERSION=$$(echo "$(VERSION)" | awk -F. "{$$3++; print}"); \
+			if [ "$(VERSION)" = "dev" ]; then NEW_VERSION="0.0.1"; \
+			else NEW_VERSION=$$(echo "$(VERSION)" | awk -F. "{$$3++; print}"); \
 			fi; \
 		fi; \
 		if ! echo "$$NEW_VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$$"; then \
 			echo "Error: Invalid semver format. Use e.g., 1.0.0 or 1.0.0-rc.1"; \
 			exit 1; \
 		fi; \
-		echo ""; \
 		echo "Tagging v$$NEW_VERSION..."; \
 		git tag "v$$NEW_VERSION"; \
-		echo "Pushing tag..."; \
 		git push origin "v$$NEW_VERSION"; \
+		echo "Building and pushing multi-arch image..."; \
+		make push; \
 		echo ""; \
-		echo "Building..."; \
-		make build-dist'
+		read -p "Deploy to OCI? [y/N] " DEPLOY; \
+		if [ "$$DEPLOY" = "y" ] || [ "$$DEPLOY" = "Y" ]; then \
+			IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query '"'"'data[0]."public-ip"'"'"' --raw-output); \
+			echo "Pulling on OCI..."; \
+			ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker pull $(REPOSITORY):latest"; \
+			JOB_ID=$$(ssh -o StrictHostKeyChecking=no ubuntu@$$IP "curl -s http://localhost:8080/api/imports/current" | grep -o '"'"'"job_id":"[^"]*"'"'"' | cut -d'"'"' -f4); \
+			if [ -n "$$JOB_ID" ]; then \
+				echo "Aborting running import $$JOB_ID..."; \
+				ssh -o StrictHostKeyChecking=no ubuntu@$$IP "curl -s -X DELETE http://localhost:8080/api/imports/$$JOB_ID"; \
+				sleep 3; \
+			fi; \
+			ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker rm -f $(CONTAINER_NAME) 2>/dev/null || true"; \
+			ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data --mount type=volume,source=x-notes-data,target=/home/data $(REPOSITORY):latest"; \
+			echo "Deployed $(REPOSITORY):$$NEW_VERSION to OCI"; \
+		fi \
+	'
 
 oci-update:
 	@TAG="$(VERSION)"; \
