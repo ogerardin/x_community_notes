@@ -1,5 +1,5 @@
 # Build stage
-FROM x-notes-builder AS builder
+FROM ogerardin/x-notes-builder AS builder
 ARG VERSION
 ARG GIT_SHA
 ARG BUILD_TIME

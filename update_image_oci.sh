@@ -40,26 +40,35 @@ fi
 echo "Connecting to $SSH_USER@$IP"
 echo "Updating to $IMAGE_NAME:$TAG"
 
-ssh -o StrictHostKeyChecking=no "$SSH_USER@$IP" << EOF
+ssh -o StrictHostKeyChecking=no "$SSH_USER@$IP" "TAG=$TAG" << 'EOF'
 set -euo pipefail
 
-OLD_DIGEST=\$(sudo docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_NAME:$TAG" 2>/dev/null || echo "")
+OLD_DIGEST=$(sudo docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_NAME:$TAG" 2>/dev/null || echo "")
 
 echo "Pulling image $IMAGE_NAME:$TAG..."
 sudo docker pull "$IMAGE_NAME:$TAG"
 
-NEW_DIGEST=\$(sudo docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_NAME:$TAG" 2>/dev/null || echo "")
+NEW_DIGEST=$(sudo docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_NAME:$TAG" 2>/dev/null || echo "")
 
-if [ "\$OLD_DIGEST" = "\$NEW_DIGEST" ] && [ -n "\$OLD_DIGEST" ]; then
+if [ "$OLD_DIGEST" = "$NEW_DIGEST" ] && [ -n "$OLD_DIGEST" ]; then
   echo "Image unchanged, skipping container recreation."
   echo "Container status:"
   sudo docker ps --filter name="$CONTAINER_NAME"
 else
-  if [ -n "\$OLD_DIGEST" ]; then
+  if [ -n "$OLD_DIGEST" ]; then
     echo "Image updated, recreating container..."
   else
     echo "No existing image, creating container..."
   fi
+  sudo docker stop "$CONTAINER_NAME" 2>/dev/null || true
+  sudo docker rm "$CONTAINER_NAME" 2>/dev/null || true
+  sudo docker run --detach --name "$CONTAINER_NAME" \
+    --publish 8080:80 \
+    --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data \
+    "$IMAGE_NAME:$TAG"
+  echo "Container status:"
+  sudo docker ps --filter name="$CONTAINER_NAME"
+fi
   sudo docker stop "$CONTAINER_NAME" 2>/dev/null || true
   sudo docker rm "$CONTAINER_NAME" 2>/dev/null || true
   sudo docker run --detach --name "$CONTAINER_NAME" \

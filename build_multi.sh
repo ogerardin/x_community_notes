@@ -12,10 +12,11 @@
 set -euo pipefail
 
 # Configurable variables
-PLATFORMS="linux/amd64,linux/arm64,linux/i386,linux/arm/v7"
+PLATFORMS="linux/amd64,linux/arm64,linux/arm/v7"
 REPOSITORY="ogerardin/x-notes"
+REPOSITORY_BUILDER="ogerardin/x-notes-builder"
 DOCKERFILE="Dockerfile-dist"
-BUILDER_NAME="mybuilder"
+BUILDER_NAME="builder-multi"
 
 # Extract version from git tag
 VERSION=$(git describe --tags --exact-match 2>/dev/null || echo "")
@@ -44,8 +45,8 @@ LABELS="--label org.opencontainers.image.version=${VERSION} --label org.opencont
 
 # Check if buildx builder exists, create if not, otherwise use it
 if ! docker buildx inspect "$BUILDER_NAME" &>/dev/null; then
-  echo "Creating buildx builder '$BUILDER_NAME'..."
-  docker buildx create --name "$BUILDER_NAME" --use
+  echo "Creating buildx builder '$BUILDER_NAME' with docker-container driver..."
+  docker buildx create --name "$BUILDER_NAME" --driver docker-container --use
 else
   echo "Using existing buildx builder '$BUILDER_NAME'..."
   docker buildx use "$BUILDER_NAME"
@@ -55,6 +56,24 @@ fi
 if ! docker buildx version &>/dev/null; then
   echo "Installing docker buildx..."
   docker buildx install
+fi
+
+# Build and push builder image first (required for multi-arch build)
+echo "Building and pushing builder image..."
+docker buildx build --platform "$PLATFORMS" \
+  --build-arg VERSION="${VERSION}" \
+  --build-arg GIT_SHA="${GIT_SHA}" \
+  --build-arg BUILD_TIME="${BUILD_TIME}" \
+  -t "$REPOSITORY_BUILDER:latest" \
+  -f cmd/api/Dockerfile-builder . --push
+
+if [ "$PUSH_LATEST_ONLY" = false ]; then
+  docker buildx build --platform "$PLATFORMS" \
+    --build-arg VERSION="${VERSION}" \
+    --build-arg GIT_SHA="${GIT_SHA}" \
+    --build-arg BUILD_TIME="${BUILD_TIME}" \
+    -t "$REPOSITORY_BUILDER:${VERSION}" \
+    -f cmd/api/Dockerfile-builder . --push
 fi
 
 if [ "$PUSH_LATEST_ONLY" = true ]; then

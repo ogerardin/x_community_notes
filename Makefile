@@ -1,4 +1,4 @@
-.PHONY: help build-builder build-api build-dist up down logs run push clean status tag-release
+.PHONY: help build-builder build-api build-dist up down logs run push clean status tag-release update-oci oci-status oci-start oci-stop oci-restart oci-logs oci-pull
 
 # Variables
 CONTAINER_NAME := x-notes
@@ -34,6 +34,13 @@ help:
 	@echo "  clean          - Remove all containers"
 	@echo "  status         - Show running containers"
 	@echo "  tag-release   - Prompt for version, git tag, push, and build"
+	@echo "  update-oci   - Update image on OCI instance (uses OCI_TAG or VERSION)"
+	@echo "  oci-status   - Check container status on OCI"
+	@echo "  oci-start    - Start container on OCI"
+	@echo "  oci-stop     - Stop container on OCI"
+	@echo "  oci-restart  - Restart container on OCI"
+	@echo "  oci-logs     - View container logs on OCI"
+	@echo "  oci-pull     - Pull latest image on OCI"
 	@echo ""
 	@echo "Version: $(VERSION)"
 	@echo "Git SHA: $(GIT_SHA)"
@@ -105,3 +112,31 @@ tag-release:
 		echo ""; \
 		echo "Building..."; \
 		make build-dist'
+
+update-oci:
+	@TAG="$(VERSION)"; \
+	if [ -n "$(OCI_TAG)" ]; then TAG="$(OCI_TAG)"; fi; \
+	echo "Updating OCI instance to $(REPOSITORY):$$TAG"; \
+	./update_image_oci.sh "$$TAG"
+
+oci-status:
+	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
+	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker ps --filter name=$(CONTAINER_NAME)"
+
+oci-start:
+	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
+	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data $(REPOSITORY):latest"
+
+oci-stop:
+	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
+	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker stop $(CONTAINER_NAME)"
+
+oci-restart: oci-stop oci-start
+
+oci-logs:
+	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
+	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker logs -f $(CONTAINER_NAME)"
+
+oci-pull:
+	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
+	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker pull $(REPOSITORY):latest"

@@ -12,3 +12,6 @@ target/
 
 # Compiled binaries
 cmd/api/x-notes-api
+
+# Node.js
+node_modules/
