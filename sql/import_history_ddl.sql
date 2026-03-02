@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS import_history (
     started_at TIMESTAMP NOT NULL,
     completed_at TIMESTAMP,
     total_rows INT,
-    status TEXT CHECK (status IN ('importing', 'completed', 'failed', 'idle', 'downloading', 'indexing')) NOT NULL,
+    status TEXT CHECK (status IN ('importing', 'completed', 'failed', 'idle', 'downloading', 'indexing', 'skipped')) NOT NULL,
     error_message TEXT,
     download_percentage INT,
     download_speed TEXT,

@@ -18,32 +18,24 @@ http {
             add_header Cache-Control "no-store";
         }
 
-        location /admin.html {
-            add_header Cache-Control "no-store";
+        location ^~ /admin/ {
+            proxy_pass http://__API__:8888;
         }
 
-        location /api/imports/current {
-            proxy_pass http://__POSTGREST__:3000/import_history?order=started_at.desc&limit=1;
-        }
-
-        location /api/imports/create {
-            proxy_pass http://__API__:8888/imports;
-        }
-
-        location /api/imports/ {
-            proxy_pass http://__API__:8888/imports/;
-        }
-
-        location /api/imports {
+        location /data/imports {
             proxy_pass http://__POSTGREST__:3000/import_history?order=started_at.desc&limit=50;
+        }
+
+        location /data/note {
+            proxy_pass http://__POSTGREST__:3000/note;
         }
 
         location /health {
             proxy_pass http://__API__:8888/health;
         }
 
-        location /api/ {
-            proxy_pass http://__POSTGREST__:3000/;
+        location /version {
+            proxy_pass http://__API__:8888/version;
         }
     }
 }

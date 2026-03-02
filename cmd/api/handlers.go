@@ -21,12 +21,83 @@ func isImportAborted(jobID string) bool {
 	return status == "failed"
 }
 
+func getImportCurrent(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+
+	var h HistoryEntry
+	var completedAt sql.NullTime
+	var totalRows sql.NullInt64
+	var errorMessage sql.NullString
+	var downloadPct sql.NullInt64
+	var downloadSpeed sql.NullString
+	var rowsProcessed sql.NullInt64
+	var downloadCached sql.NullBool
+	var downloadDuration sql.NullInt64
+	var importDuration sql.NullInt64
+	var fileSize sql.NullInt64
+	var totalFiles sql.NullInt64
+	var currentFileIndex sql.NullInt64
+	var filesProcessed sql.NullInt64
+	var fileNames sql.NullString
+	var indexingStartedAt sql.NullTime
+	var indexPhase sql.NullString
+	var indexBlocksDone sql.NullInt64
+	var indexBlocksTotal sql.NullInt64
+
+	err := db.QueryRowContext(ctx, `
+		SELECT id, job_id, started_at, completed_at, total_rows, status, error_message,
+		       download_percentage, download_speed, rows_processed, download_cached, download_duration, import_duration, file_size,
+		       total_files, current_file_index, files_processed, file_names,
+		       indexing_started_at, index_phase, index_blocks_done, index_blocks_total
+		FROM import_history
+		ORDER BY started_at DESC
+		LIMIT 1
+	`).Scan(&h.ID, &h.JobID, &h.StartedAt, &completedAt, &totalRows, &h.Status, &errorMessage, &downloadPct, &downloadSpeed, &rowsProcessed, &downloadCached, &downloadDuration, &importDuration, &fileSize, &totalFiles, &currentFileIndex, &filesProcessed, &fileNames, &indexingStartedAt, &indexPhase, &indexBlocksDone, &indexBlocksTotal)
+
+	if err == sql.ErrNoRows {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("null"))
+		return
+	}
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "Failed to get import: "+err.Error())
+		return
+	}
+
+	h.CompletedAt = nullTimeToTimePtr(completedAt)
+	h.TotalRows = nullInt64ToIntPtr(totalRows)
+	h.ErrorMessage = nullStringToStrPtr(errorMessage)
+	h.DownloadPercentage = nullInt64ToIntPtr(downloadPct)
+	h.DownloadSpeed = nullStringToStrPtr(downloadSpeed)
+	h.RowsProcessed = nullInt64ToIntPtr(rowsProcessed)
+	h.DownloadCached = nullBoolToBoolPtr(downloadCached)
+	h.DownloadDuration = nullInt64ToIntPtr(downloadDuration)
+	h.ImportDuration = nullInt64ToIntPtr(importDuration)
+	h.FileSize = nullInt64ToInt64Ptr(fileSize)
+	h.TotalFiles = nullInt64ToIntPtr(totalFiles)
+	h.CurrentFileIndex = nullInt64ToIntPtr(currentFileIndex)
+	h.FilesProcessed = nullInt64ToIntPtr(filesProcessed)
+	h.FileNames = nullStringToStrPtr(fileNames)
+	h.IndexingStartedAt = nullTimeToTimePtr(indexingStartedAt)
+	h.IndexPhase = nullStringToStrPtr(indexPhase)
+	h.IndexBlocksDone = nullInt64ToIntPtr(indexBlocksDone)
+	h.IndexBlocksTotal = nullInt64ToIntPtr(indexBlocksTotal)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(h)
+}
+
 func getImportByID(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	jobID := r.PathValue("job_id")
 
 	if jobID == "" {
 		writeProblem(w, http.StatusBadRequest, "Bad Request", "Job ID is required")
+		return
+	}
+
+	if jobID == "current" {
+		getImportCurrent(w, r)
 		return
 	}
 
@@ -157,7 +228,7 @@ func createImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Location", "/imports/"+jobID)
+	w.Header().Set("Location", "/admin/imports/"+jobID)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Import started", "job_id": jobID})
 

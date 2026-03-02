@@ -298,7 +298,7 @@ func sanitizeImportStatus() {
 	_, err := db.ExecContext(ctx, `
 		UPDATE import_history 
 		SET status = 'failed', error_message = 'Interrupted'
-		WHERE status IN ('importing', 'downloading')
+		WHERE status IN ('importing', 'downloading', 'indexing')
 	`)
 	if err != nil {
 		logger.Warn("Failed to sanitize import status", "error", err)

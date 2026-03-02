@@ -466,7 +466,7 @@ h2 { font-size: 1.15rem; }
 
 .history-table th,
 .history-table td {
-    padding: 0.5rem 0.75rem;
+    padding: 0.25rem 0.5rem;
 }
 
 .progress-bar-wrap {

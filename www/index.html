@@ -25,24 +25,31 @@
                 backendOnline: true,
                 importPollInterval: null,
                 schedulerStatus: null,
+                versionInfo: null,
                 setTab(tab) {
                     this.activeTab = tab;
                     window.location.hash = tab;
                 },
+                async fetchVersionInfo() {
+                    try {
+                        let resp = await fetch('/version');
+                        if (resp.ok) this.versionInfo = await resp.json();
+                    } catch (e) {}
+                },
                 async refreshNoteStats() {
                     if (['downloading', 'importing', 'indexing'].includes(this.importStatus?.status)) return;
                     try {
-                        let resp = await fetch('/api/note?select=summary.count()');
+                        let resp = await fetch('/data/note?select=summary.count()');
                         let data = await resp.json();
                         this.noteCount = data[0]?.count ?? 0;
-                        resp = await fetch('/api/note?select=createdatmillis.max()');
+                        resp = await fetch('/data/note?select=createdatmillis.max()');
                         data = await resp.json();
                         this.latestTimestamp = data[0]?.max ?? 0;
                     } catch (e) {}
                 },
                 async fetchImportStatus() {
                     try {
-                        let resp = await fetch('/api/imports/current');
+                        let resp = await fetch('/admin/imports/current');
                         if (!resp.ok) throw new Error('Failed to fetch import status');
                         let data = await resp.json();
                         this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
@@ -58,20 +65,24 @@
                 },
                 async fetchImportHistory() {
                     try {
-                        let resp = await fetch('/api/imports');
+                        let resp = await fetch('/data/imports');
                         if (!resp.ok) throw new Error('Failed to fetch import history');
                         this.importHistory = await resp.json() || [];
                     } catch (e) {}
                 },
                 async fetchSchedulerStatus() {
                     try {
-                        let resp = await fetch('/api/imports/scheduler');
+                        let resp = await fetch('/admin/imports/scheduler');
                         if (resp.ok) this.schedulerStatus = await resp.json();
+                        await this.fetchImportStatus();
                     } catch (e) {}
                 },
                 startPolling() {
-                    if (this.importPollInterval) return;
-                    this.importPollInterval = setInterval(() => this.fetchImportStatus(), 5000);
+                    if (this.importPollInterval) {
+                        clearInterval(this.importPollInterval);
+                    }
+                    const interval = ['importing', 'downloading', 'indexing'].includes(this.importStatus?.status) ? 2000 : 30000;
+                    this.importPollInterval = setInterval(() => this.fetchImportStatus(), interval);
                 },
                 stopPolling() {
                     if (this.importPollInterval) {
@@ -86,6 +97,8 @@
                         case 'importing':
                         case 'downloading':
                         case 'indexing': return 'badge-info';
+                        case 'skipped':
+                        case 'idle':
                         default: return 'badge-warning';
                     }
                 },
@@ -120,7 +133,7 @@
                             this.importError = 'Update already in progress';
                             return;
                         }
-                        let resp = await fetch('/api/imports/create', { method: 'POST' });
+                        let resp = await fetch('/admin/imports/create', { method: 'POST' });
                         if (!resp.ok) throw new Error('Failed to trigger update: ' + resp.status);
                         await this.fetchImportStatus();
                     } catch (e) {
@@ -130,7 +143,7 @@
                 async abortImport() {
                     try {
                         if (!this.importStatus?.job_id) return;
-                        let resp = await fetch('/api/imports/' + this.importStatus.job_id, { method: 'DELETE' });
+                        let resp = await fetch('/admin/imports/' + this.importStatus.job_id, { method: 'DELETE' });
                         if (!resp.ok) throw new Error('Failed to abort update');
                         await this.fetchImportStatus();
                     } catch (e) {
@@ -141,6 +154,7 @@
                     this.refreshNoteStats();
                     this.fetchImportStatus();
                     this.fetchSchedulerStatus();
+                    this.fetchVersionInfo();
                     setInterval(() => this.refreshNoteStats(), 30000);
                     setInterval(() => this.fetchSchedulerStatus(), 60000);
                     window.addEventListener('hashchange', () => {
@@ -168,7 +182,7 @@
                     this.loading = true;
                     this.error = '';
                     try {
-                        const response = await fetch('/api/note?limit=50&offset=' + this.offset + '&summary_ts=wfts.' + encodeURIComponent(this.search) + '&select=createdatmillis,noteid,tweetid,noteauthorparticipantid,summary&order=createdatmillis.desc', {
+                        const response = await fetch('/data/note?limit=50&offset=' + this.offset + '&summary_ts=wfts.' + encodeURIComponent(this.search) + '&select=createdatmillis,noteid,tweetid,noteauthorparticipantid,summary&order=createdatmillis.desc', {
                             headers: { 'Prefer': 'count=exact' }
                         });
                         if (!response.ok) throw new Error('Fetch failed with status ' + response.status);
@@ -353,6 +367,13 @@
                     <div x-show="!schedulerStatus?.enabled" style="color: var(--text-muted);">Disabled</div>
                 </div>
             </div>
+            <div class="stat-card" x-show="versionInfo">
+                <span class="stat-label">Backend</span>
+                <div style="display: flex; flex-direction: column; gap: 0.125rem;">
+                    <span x-text="versionInfo?.version || '-'"></span>
+                    <span style="color: var(--text-secondary); font-size: 0.75rem;" x-text="versionInfo?.gitSHA?.slice(0,7) + ' • ' + versionInfo?.goos + '/' + versionInfo?.goarch"></span>
+                </div>
+            </div>
         </div>
 
         <div class="import-controls">
@@ -398,9 +419,9 @@
                                 <td x-text="h.status === 'completed' && h.completed_at ? new Date(h.completed_at).toLocaleString() : '-'"></td>
                                 <td>
                                     <template x-if="h.file_names">
-                                        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                        <div style="display: flex; flex-direction: column; gap: 0.125rem;">
                                             <template x-for="f in h.file_names.split(',')" :key="f">
-                                                <span style="font-size: 0.8rem; color: var(--text-secondary);" x-text="f"></span>
+                                                <span style="color: var(--text-secondary); white-space: nowrap;" x-text="f"></span>
                                             </template>
                                         </div>
                                     </template>
@@ -408,29 +429,39 @@
                                 </td>
                                 <td>
                                     <template x-if="h.status === 'downloading'">
-                                        <span style="color: var(--accent);" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ' — ' + (h.download_percentage ?? 0) + '%'"></span>
+                                        <div class="progress-bar-wrap">
+                                            <span style="color: var(--accent);" x-text="(h.current_file_index ?? 0) + 1 + ' / ' + (h.total_files ?? 0) + ' — ' + (h.download_percentage ?? 0) + '%'"></span>
+                                            <div class="progress-bar">
+                                                <div class="progress-bar-fill" :style="'width:' + (h.download_percentage ?? 0) + '%'"></div>
+                                            </div>
+                                        </div>
                                     </template>
                                     <template x-if="h.status !== 'downloading' && h.download_cached">
-                                        <span style="color: var(--text-secondary);" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' (cached)'"></span>
+                                        <span style="color: var(--text-secondary);" x-text="formatFileSize(h.file_size) + ' (cached)'"></span>
                                     </template>
                                     <template x-if="h.status !== 'downloading' && !h.download_cached && h.download_duration !== null">
-                                        <span style="color: var(--text-secondary);" x-text="(h.total_files ?? 0) + ' files, ' + formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) + (h.download_speed ? ' ' + h.download_speed : '')"></span>
+                                        <span style="color: var(--text-secondary);" x-text="formatFileSize(h.file_size) + ' in ' + formatDuration(h.download_duration) + (h.download_speed ? ' ' + h.download_speed : '')"></span>
                                     </template>
                                     <span x-show="h.status !== 'downloading' && !h.download_cached && h.download_duration === null" style="color: var(--text-muted);">-</span>
                                 </td>
                                 <td>
                                     <template x-if="h.status === 'importing'">
-                                        <span style="color: var(--accent);" x-text="(h.rows_processed ?? 0).toLocaleString() + ' / ' + (h.total_rows ? h.total_rows.toLocaleString() : '?') + ' (' + (h.total_rows ? Math.round((h.rows_processed ?? 0) / h.total_rows * 100) : 0) + '%)'"></span>
+                                        <div class="progress-bar-wrap">
+                                            <span style="color: var(--accent);" x-text="(h.rows_processed ?? 0).toLocaleString() + ' / ' + (h.total_rows ? h.total_rows.toLocaleString() : '?') + ' (' + (h.total_rows ? Math.round((h.rows_processed ?? 0) / h.total_rows * 100) : 0) + '%)'"></span>
+                                            <div class="progress-bar">
+                                                <div class="progress-bar-fill" :style="'width:' + (h.total_rows ? Math.round((h.rows_processed ?? 0) / h.total_rows * 100) : 100) + '%'"></div>
+                                            </div>
+                                        </div>
                                     </template>
                                     <template x-if="h.status === 'completed' || h.status === 'indexing'">
                                         <span style="color: var(--text-secondary);" x-text="(h.total_rows ?? 0).toLocaleString() + ' rows in ' + formatDuration(h.import_duration)"></span>
                                     </template>
-                                    <span x-show="h.status === 'idle' || h.status === 'failed' || h.status === 'downloading'" style="color: var(--text-muted);">-</span>
+                                    <span x-show="h.status === 'idle' || h.status === 'failed' || h.status === 'downloading' || h.status === 'skipped'" style="color: var(--text-muted);">-</span>
                                 </td>
                                 <td>
                                     <template x-if="h.status === 'indexing'">
                                         <div class="progress-bar-wrap">
-                                            <span style="color: var(--accent); font-size: 0.75rem;" x-text="h.index_blocks_total ? Math.round((h.index_blocks_done ?? 0) / h.index_blocks_total * 100) + '% — ' + (h.index_phase ?? 'building indexes') : (h.index_phase ?? 'building indexes...')"></span>
+                                            <span style="color: var(--accent);" x-text="h.index_blocks_total ? Math.round((h.index_blocks_done ?? 0) / h.index_blocks_total * 100) + '% — ' + (h.index_phase ?? 'building indexes') : (h.index_phase ?? 'building indexes...')"></span>
                                             <div class="progress-bar">
                                                 <div class="progress-bar-fill" :style="'width:' + (h.index_blocks_total ? Math.round((h.index_blocks_done ?? 0) / h.index_blocks_total * 100) : 100) + '%'"></div>
                                             </div>
@@ -443,7 +474,7 @@
                                 </td>
                                 <td>
                                     <span class="badge" :class="statusBadgeClass(h.status)" x-text="h.status"></span>
-                                    <span x-show="h.error_message" style="color: var(--error); display: block; margin-top: 0.25rem; font-size: 0.75rem;" x-text="h.error_message"></span>
+                                    <span x-show="h.error_message" style="color: var(--error); display: block; margin-top: 0.25rem;" x-text="h.error_message"></span>
                                 </td>
                             </tr>
                         </template>
