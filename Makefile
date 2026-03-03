@@ -106,7 +106,7 @@ release:
 		read -p "Enter version (or press Enter for suggested next patch): " NEW_VERSION; \
 		if [ -z "$$NEW_VERSION" ]; then \
 			if [ "$(VERSION)" = "dev" ]; then NEW_VERSION="0.0.1"; \
-			else NEW_VERSION=$$(echo "$(VERSION)" | awk -F. "{$$3++; print}"); \
+			else NEW_VERSION=$$(echo "$(VERSION)" | awk -F. '{$$3++; print $$1"."$$2"."$$3}'); \
 			fi; \
 		fi; \
 		if ! echo "$$NEW_VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$$"; then \
