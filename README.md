@@ -1,12 +1,16 @@
 # Searchable X/Twitter Community Notes Database
 
-Community Notes, formerly known as Birdwatch, is a feature on X (formerly Twitter) where contributors can add context
+Community Notes is a feature of X (formerly Twitter) where contributors can add context
 such as fact-checks under a post, see https://x.com/i/communitynotes
 
 Unfortunately X/Twitter does not provide a way to search through the notes, either through a web interface or an API.
 This project is intended to fill that gap by providing a searchable database of the notes.
 
+This project was born from the need to counter online disinformation on X/Twitter efficiently after russia's invasion 
+of 🇺🇦 Ukraine in 2022. 
+
 ## Architecture
+Note: the design was influenced by a similar project https://github.com/bpettis/birdwatch-scraper
 
 The application consists of the following components:
 
@@ -250,7 +254,6 @@ References:
  
 ## TODO
 
-- [x] schedule the loader to run periodically (implemented via auto-import)
-- [ ] better handling of data updates (currently requires full re-import)
+- manage permissions
 
 
