@@ -254,6 +254,7 @@ References:
  
 ## TODO
 
-- schedule the loader to run periodically
+- [x] schedule the loader to run periodically (implemented via auto-import)
+- [ ] better handling of data updates (currently requires full re-import)
 
 

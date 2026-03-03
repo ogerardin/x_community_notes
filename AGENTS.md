@@ -140,7 +140,8 @@ Standard Go import grouping (enforced by `goimports`):
 - Plain HTML + vanilla JS with [AlpineJS](https://alpinejs.dev/)
 - No build step, no npm
 - State in AlpineJS `x-data` object
-- Polling: 2s for active import, 5s for status/health
+- Polling: 2s for active import, 60s for scheduler status
+- **Row count**: Uses `importHistory.total_rows` from completed jobs (via `latestCompletedImport` computed property)
 
 ### Database Initialization
 - DDL scripts in `sql/*.sql` are executed on first database init
@@ -152,6 +153,7 @@ Standard Go import grouping (enforced by `goimports`):
 - Multi-stage builds for Go; pin versions (`golang:1.26-alpine`, `postgres:17-alpine`)
 - In `Dockerfile-dist`, use `127.0.0.1` not `localhost` in nginx proxy_pass
 - Use `pg_isready` to wait for Postgres — not `sleep`
+- Use `docker buildx build --load` for local single-container builds
 
 ### Authentication
 - PostgreSQL uses `trust` authentication for internal container communication

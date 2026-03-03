@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>X/Twitter Community Notes</title>
-    <link rel="stylesheet" href="/styles.css?v=14">
+    <link rel="stylesheet" href="/styles.css?v=15">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>
         document.addEventListener('alpine:init', () => {
@@ -26,6 +26,9 @@
                 importPollInterval: null,
                 schedulerStatus: null,
                 versionInfo: null,
+                get latestCompletedImport() {
+                    return this.importHistory.find(h => h.status === 'completed');
+                },
                 setTab(tab) {
                     this.activeTab = tab;
                     window.location.hash = tab;
@@ -39,28 +42,29 @@
                 async refreshNoteStats() {
                     if (['downloading', 'importing', 'indexing'].includes(this.importStatus?.status)) return;
                     try {
-                        let resp = await fetch('/data/note?select=summary.count()');
-                        let data = await resp.json();
-                        this.noteCount = data[0]?.count ?? 0;
-                        resp = await fetch('/data/note?select=createdatmillis.max()');
-                        data = await resp.json();
-                        this.latestTimestamp = data[0]?.max ?? 0;
+                        const completed = this.importHistory.find(h => h.status === 'completed');
+                        this.noteCount = completed?.total_rows ?? this.noteCount;
+                        this.latestTimestamp = completed?.completed_at ? new Date(completed.completed_at).getTime() : this.latestTimestamp;
                     } catch (e) {}
                 },
                 async fetchImportStatus() {
                     try {
                         let resp = await fetch('/admin/imports/current');
-                        if (!resp.ok) throw new Error('Failed to fetch import status');
+                        if (!resp.ok) {
+                            const errData = await resp.json().catch(() => ({}));
+                            throw new Error(errData.detail || `HTTP ${resp.status}: Failed to fetch import status`);
+                        }
                         let data = await resp.json();
                         this.importStatus = Array.isArray(data) ? (data[0] ?? null) : data;
                         this.importError = '';
                         this.backendOnline = true;
                         await this.fetchImportHistory();
+                        this.refreshNoteStats();
                         const active = ['importing', 'downloading', 'indexing'].includes(this.importStatus?.status);
                         if (active) this.startPolling(); else this.stopPolling();
                     } catch (e) {
                         this.backendOnline = false;
-                        this.importError = '';
+                        this.importError = e.message;
                     }
                 },
                 async fetchImportHistory() {
@@ -110,6 +114,9 @@
                 },
                 formatDateTime(ts) {
                     if (!ts) return '-';
+                    if (typeof ts === 'number') {
+                        return new Date(ts).toLocaleString();
+                    }
                     return new Date(ts + 'Z').toLocaleString();
                 },
                 formatFileSize(bytes) {
@@ -155,11 +162,9 @@
                     }
                 },
                 init() {
-                    this.refreshNoteStats();
                     this.fetchImportStatus();
                     this.fetchSchedulerStatus();
                     this.fetchVersionInfo();
-                    setInterval(() => this.refreshNoteStats(), 30000);
                     setInterval(() => this.fetchSchedulerStatus(), 60000);
                     window.addEventListener('hashchange', () => {
                         this.activeTab = window.location.hash?.slice(1) || 'search';
@@ -250,7 +255,7 @@
                 <svg class="spinner" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4"/></svg>
                 <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : importStatus?.status === 'indexing' ? (importStatus?.index_blocks_total ? Math.round((importStatus?.index_blocks_done ?? 0) / importStatus.index_blocks_total * 100) + '%' : '...') : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?'))"></span>)
             </span>
-            <span class="header-stats" x-show="!['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes<template x-if="latestTimestamp">, Latest: <span x-text="formatDateTime(latestTimestamp)"></span></template>)</span>
+            <span class="header-stats" x-show="!['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak>(<span x-text="(latestCompletedImport?.total_rows ?? 0).toLocaleString()"></span> notes<template x-if="latestCompletedImport?.completed_at"> <span x-text="'• ' + formatDateTime(latestCompletedImport.completed_at)"></span></template>)</span>
         </div>
         <nav class="tabs">
             <button 

@@ -60,7 +60,7 @@ build-api: build-builder
 	@docker build -t $(DOCKER_API) -f cmd/api/Dockerfile $(BUILD_ARGS) .
 
 build-dist: build-builder
-	@docker build -t $(DOCKER_DIST) -f Dockerfile-dist $(BUILD_ARGS) $(LABELS) .
+	@docker buildx build -t $(DOCKER_DIST) -f Dockerfile-dist $(BUILD_ARGS) $(LABELS) --load .
 
 compose-up: build-builder
 	@docker volume create x-notes-db 2>/dev/null || true
