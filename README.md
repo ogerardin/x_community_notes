@@ -8,31 +8,28 @@ This project is intended to fill that gap by providing a searchable database of 
 
 ## Architecture
 
-The architecture of the project is as follows:
+The application consists of the following components:
 
-- PostgreSQL database to store the notes
-- PostgREST to provide a RESTful API for the database
-- Nginx as a reverse proxy for PostgREST and the web search interface
-- A loader script that fetches the notes from the Community Notes downloads page and loads them into the database
-- A web search interface (built using AlpineJS) that allows users to search through the notes using full-text search and other filters
-- Optionally, Swagger UI for API documentation and Adminer for database management
+- **PostgreSQL database** - Stores the notes and import history
+- **PostgREST** - Auto-generates a RESTful API from the database schema
+- **Go API server** - Handles scheduled imports, download management, and control endpoints
+- **Nginx** - Reverse proxy for PostgREST, Go API, and serves the static web UI
+- **Web UI** - AlpineJS-based search interface with full-text search
+- **Optional**: Swagger UI for API docs, Adminer for database management
 
-The project can be run using Docker Compose or a single Docker container.
+Two deployment modes are supported:
 
-- For local development, the Docker Compose
-  version is recommended as it allows for easier access to the database and API for testing and debugging.
-- For deployment, the single Docker container version is more suitable as it simplifies deployment and
-  reduces the number of services to manage.
+- **Docker Compose** (development): Separate containers for each service, easier debugging
+- **Single container** (production): All services bundled in one image for simple deployment
 
-In both methods the database data is persisted between restarts in a Docker volume named `x-notes-db`.
+In both modes, data persists in the Docker volume `x-notes-db`.
 
 **Note:** PostgreSQL 18 requires the `PGDATA` environment variable to be set for data persistence to work correctly. This is already configured in both the Dockerfile and docker-compose.yml.
 
 
 ## Method 1: Docker Compose
 
-In this version, we use Docker Compose to start separate containers for the PostgreSQL database, PostgREST, and Nginx. 
-The loader script can be run locally on the host machine, and it will connect to the database container to load the notes.
+In this version, we use Docker Compose to start separate containers for the PostgreSQL database, PostgREST, Nginx, and the Go API server.
 
 ### Requirements
 
@@ -101,13 +98,12 @@ Open the following URL: http://localhost:8080
 
 ## Method 2: Single Docker container
 
-In this version, we use a single Docker container that runs PostgreSQL, PostgREST, and Nginx. 
-The loader script runs inside the container.
+In this version, we use a single Docker container that runs PostgreSQL, PostgREST, Nginx, and the Go API server with built-in scheduler.
 
 ### Build and start the Docker container
 
 ```bash
-  ./build_and_run.sh
+  make run
 ```
 
 This will start a container named `x-notes` with all the services running inside it.
