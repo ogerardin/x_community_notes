@@ -26,8 +26,8 @@ ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}
 ENV POSTGREST_VERSION=14.5
 ENV HOMEDIR=/home
 ENV POSTGRES_SUPERUSER_RESERVED_CONNECTIONS=3
-ENV POSTGRES_MAINTENANCE_WORK_MEM=96MB
-ENV POSTGRES_WORK_MEM=16MB
+ENV POSTGRES_MAINTENANCE_WORK_MEM=256MB
+ENV POSTGRES_WORK_MEM=64MB
 ENV PGDATA=/var/lib/postgresql/data/18/docker
 
 RUN apk add --no-cache curl nginx
@@ -53,6 +53,8 @@ db-aggregates-enabled = true
 db-pool = 50
 db-pool-max = 50
 db-pool-min = 10
+db-query-timeout = 120
+server-timeout = 120
 EOF
 
 # Add the static files for the web interface
@@ -76,7 +78,7 @@ VOLUME ["$HOMEDIR/data"]
 # Create a script to serve as entrypoint to start all services
 # The script starts Postgres, PostgREST, Nginx, and the API server
 COPY <<EOF run.sh
-/usr/local/bin/docker-entrypoint.sh postgres -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM} -c work_mem=${POSTGRES_WORK_MEM} &
+/usr/local/bin/docker-entrypoint.sh postgres -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM} -c work_mem=${POSTGRES_WORK_MEM} -c statement_timeout=120000 -c log_min_duration_statement=1000 &
 until pg_isready -q; do sleep 1; done
 /usr/local/bin/postgrest ${HOMEDIR}/postgrest.conf &
 /usr/local/bin/api-server &
