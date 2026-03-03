@@ -105,7 +105,7 @@ release:
 	@$(SHELL) -c '\
 		read -p "Enter version (or press Enter for suggested next patch): " NEW_VERSION; \
 		if [ -z "$$NEW_VERSION" ]; then \
-			NEW_VERSION=$$(echo "$(VERSION)" | awk -F. '{$$3++; print $$1"."$$2"."$$3}'); \
+			NEW_VERSION=$$(echo "$(VERSION)" | awk -F. '{print $$1"."$$2"."($$3+1)}'); \
 		fi; \
 		if ! echo "$$NEW_VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$$"; then \
 			echo "Error: Invalid semver format. Use e.g., 1.0.0 or 1.0.0-rc.1"; \
