@@ -13,7 +13,7 @@ REPOSITORY := ogerardin/x-notes
 MODE := $(shell if docker ps --format '{{.Names}}' | grep -q '^x-notes$$'; then echo "single"; else echo "compose"; fi)
 
 # Version variables
-VERSION := $(shell VERSION=$$(git describe --tags --exact-match 2>/dev/null | sed 's/^v//'); [ -n "$$VERSION" ] && echo "$$VERSION" || echo "dev")
+VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
 GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")
 
@@ -105,9 +105,7 @@ release:
 	@$(SHELL) -c '\
 		read -p "Enter version (or press Enter for suggested next patch): " NEW_VERSION; \
 		if [ -z "$$NEW_VERSION" ]; then \
-			if [ "$(VERSION)" = "dev" ]; then NEW_VERSION="0.0.1"; \
-			else NEW_VERSION=$$(echo "$(VERSION)" | awk -F. '{$$3++; print $$1"."$$2"."$$3}'); \
-			fi; \
+			NEW_VERSION=$$(echo "$(VERSION)" | awk -F. '{$$3++; print $$1"."$$2"."$$3}'); \
 		fi; \
 		if ! echo "$$NEW_VERSION" | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$$"; then \
 			echo "Error: Invalid semver format. Use e.g., 1.0.0 or 1.0.0-rc.1"; \
