@@ -108,6 +108,10 @@
                     const s = seconds % 60;
                     return m > 0 ? (s > 0 ? m + 'm ' + s + 's' : m + 'm') : s + 's';
                 },
+                formatDateTime(ts) {
+                    if (!ts) return '-';
+                    return new Date(ts + 'Z').toLocaleString();
+                },
                 formatFileSize(bytes) {
                     if (bytes === null || bytes === undefined) return '';
                     if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
@@ -246,7 +250,7 @@
                 <svg class="spinner" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4"/></svg>
                 <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : importStatus?.status === 'indexing' ? (importStatus?.index_blocks_total ? Math.round((importStatus?.index_blocks_done ?? 0) / importStatus.index_blocks_total * 100) + '%' : '...') : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?'))"></span>)
             </span>
-            <span class="header-stats" x-show="!['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes<template x-if="latestTimestamp">, Latest: <span x-text="new Date(latestTimestamp).toLocaleDateString()"></span></template>)</span>
+            <span class="header-stats" x-show="!['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak>(<span x-text="noteCount.toLocaleString()"></span> notes<template x-if="latestTimestamp">, Latest: <span x-text="formatDateTime(latestTimestamp)"></span></template>)</span>
         </div>
         <nav class="tabs">
             <button 
@@ -312,7 +316,7 @@
                 <article class="note-card">
                     <div class="note-header">
                         <div class="note-meta">
-                            <span class="note-date" x-text="new Date(item.createdatmillis).toLocaleString()"></span>
+                            <span class="note-date" x-text="formatDateTime(item.createdatmillis)"></span>
                             <span class="author-badge" :style="'background: ' + hashColor(item.noteauthorparticipantid)" x-text="item.noteauthorparticipantid?.slice(-4) || ''"></span>
                         </div>
                         <div class="note-actions">
@@ -415,8 +419,8 @@
                     <tbody x-show="importHistory.length > 0">
                         <template x-for="h in importHistory" :key="h.id">
                             <tr>
-                                <td x-text="new Date(h.started_at).toLocaleString()"></td>
-                                <td x-text="h.status === 'completed' && h.completed_at ? new Date(h.completed_at).toLocaleString() : '-'"></td>
+                                <td x-text="formatDateTime(h.started_at)"></td>
+                                <td x-text="h.status === 'completed' && h.completed_at ? formatDateTime(h.completed_at) : '-'"></td>
                                 <td>
                                     <template x-if="h.file_names">
                                         <div style="display: flex; flex-direction: column; gap: 0.125rem;">

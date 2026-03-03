@@ -28,6 +28,7 @@ ENV HOMEDIR=/home
 ENV POSTGRES_SUPERUSER_RESERVED_CONNECTIONS=3
 ENV POSTGRES_MAINTENANCE_WORK_MEM=96MB
 ENV POSTGRES_WORK_MEM=16MB
+ENV PGDATA=/var/lib/postgresql/data/18/docker
 
 RUN apk add --no-cache curl nginx
 
@@ -66,7 +67,7 @@ RUN sed -e 's/__POSTGREST__/127.0.0.1/g' -e 's/__API__/127.0.0.1/g' nginx.conf.t
 # Copy the API server binary from builder
 COPY --from=builder /src/api-server /usr/local/bin/
 
-# Import can be triggered via API: curl -X POST http://localhost:8080/api/imports
+# Import can be triggered via API: curl -X POST http://localhost:8080/api/imports/create
 
 # Data directory for downloaded notes
 VOLUME ["$HOMEDIR/data"]

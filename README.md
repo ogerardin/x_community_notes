@@ -24,7 +24,9 @@ The project can be run using Docker Compose or a single Docker container.
 - For deployment, the single Docker container version is more suitable as it simplifies deployment and
   reduces the number of services to manage.
 
-In both methods the database data is persisted between restarts in a Docker volume named `notes-db`.
+In both methods the database data is persisted between restarts in a Docker volume named `x-notes-db`.
+
+**Note:** PostgreSQL 18 requires the `PGDATA` environment variable to be set for data persistence to work correctly. This is already configured in both the Dockerfile and docker-compose.yml.
 
 
 ## Method 1: Docker Compose
@@ -71,13 +73,16 @@ To load the notes into the database, trigger the import via API:
 
 ```bash
 # Full import (all available files)
-curl -X POST http://localhost:8080/api/import/trigger
+curl -X POST http://localhost:8080/api/imports/create
 
-# Test import (limited rows per file for faster testing)
-curl -X POST "http://localhost:8080/api/import/trigger?limit=1000"
+# Check import status
+curl http://localhost:8080/api/imports/current
+
+# List import history
+curl http://localhost:8080/api/imports
 ```
 
-Or use the Admin UI at http://localhost:8080/admin.html
+Or use the web UI at http://localhost:8080 (Admin tab)
 
 ### Accessing the note search UI
 
@@ -113,10 +118,10 @@ To load the notes into the database, trigger the import via API:
 
 ```bash
 # Full import (all available files)
-curl -X POST http://localhost:8080/api/import/trigger
+curl -X POST http://localhost:8080/api/imports/create
 
-# Test import (limited rows per file for faster testing)
-curl -X POST "http://localhost:8080/api/import/trigger?limit=1000"
+# Check import status
+curl http://localhost:8080/api/imports/current
 ```
 
 #### Monitoring the loader
@@ -192,7 +197,6 @@ The build script targets the following platforms:
 
 - `linux/amd64`
 - `linux/arm64`
-- `linux/i386`
 - `linux/arm/v7`
 
 **Note:** Building multi-architecture images requires Docker Buildx and a compatible builder. The script will create the
