@@ -8,6 +8,8 @@ http {
     proxy_send_timeout 120s;
     proxy_read_timeout 120s;
 
+    proxy_cache_path /tmp/nginx_cache levels=1:2 keys_zone=search_cache:10m max_size=100m inactive=5m use_temp_path=off;
+
     server {
         listen 80;
         root /home/www;
@@ -32,6 +34,10 @@ http {
 
         location /data/note {
             proxy_pass http://__POSTGREST__:3000/note;
+            proxy_cache search_cache;
+            proxy_cache_valid 200 5m;
+            proxy_cache_key "$scheme$request_method$host$request_uri";
+            add_header X-Cache-Status $upstream_cache_status;
         }
 
         location /health {
