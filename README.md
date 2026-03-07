@@ -39,7 +39,6 @@ In this version, we use Docker Compose to start separate containers for the Post
 
 - Internet connection
 - Docker with Compose plug-in
-- bash shell with curl, jq, unzip installed
 
 ### Start the Docker compose stack
 
