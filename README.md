@@ -30,6 +30,8 @@ In both modes, data persists in the Docker volume `x-notes-db`.
 
 **Note:** PostgreSQL 18 requires the `PGDATA` environment variable to be set for data persistence to work correctly. This is already configured in both the Dockerfile and docker-compose.yml.
 
+**Version:** This is version 0.0.14
+
 
 ## Method 1: Docker Compose
 
