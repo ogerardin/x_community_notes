@@ -5,10 +5,14 @@ ARG GIT_SHA
 ARG BUILD_TIME
 
 # Runtime stage
-FROM alpine:latest
+FROM alpine:3.21
 ARG VERSION
 ARG GIT_SHA
 ARG BUILD_TIME
+
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${GIT_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIME}"
 
 RUN apk --no-cache add ca-certificates bash curl
 WORKDIR /home

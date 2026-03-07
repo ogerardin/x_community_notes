@@ -47,7 +47,7 @@ if [ "$DEPLOY" = "y" ] || [ "$DEPLOY" = "Y" ]; then
     fi
 
     ssh -o StrictHostKeyChecking=no ubuntu@$IP "sudo docker rm -f $CONTAINER_NAME 2>/dev/null || true"
-    ssh -o StrictHostKeyChecking=no ubuntu@$IP "sudo docker run -d --name $CONTAINER_NAME --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data --mount type=volume,source=x-notes-data,target=/home/data $REPOSITORY:latest"
+    ssh -o StrictHostKeyChecking=no ubuntu@$IP "sudo docker run -d --name $CONTAINER_NAME --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql --mount type=volume,source=x-notes-data,target=/home/data $REPOSITORY:latest"
 
     echo "Deployed $REPOSITORY:$NEW_VERSION to OCI"
 fi

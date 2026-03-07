@@ -21,14 +21,22 @@ ENV API_VERSION=${VERSION}
 ENV API_GIT_SHA=${GIT_SHA}
 ENV API_BUILD_TIME=${BUILD_TIME}
 
+ENV HOMEDIR=/home
+ENV ADMIN_CONTROLS_DISABLED=false
+
 ARG POSTGRES_HOST_AUTH_METHOD=trust
 ENV POSTGRES_HOST_AUTH_METHOD=${POSTGRES_HOST_AUTH_METHOD}
 ENV POSTGREST_VERSION=14.5
-ENV HOMEDIR=/home
 ENV POSTGRES_SUPERUSER_RESERVED_CONNECTIONS=3
 ENV POSTGRES_MAINTENANCE_WORK_MEM=256MB
 ENV POSTGRES_WORK_MEM=64MB
-ENV PGDATA=/var/lib/postgresql/data/18/docker
+ENV POSTGRES_SHARED_BUFFERS=256MB
+ENV POSTGRES_EFFECTIVE_CACHE_SIZE=512MB
+ENV POSTGRES_MAX_PARALLEL_WORKERS=0
+ENV POSTGRES_RANDOM_PAGE_COST=1.1
+ENV POSTGRES_STATEMENT_TIMEOUT=0
+ENV POSTGRES_LOG_MIN_DURATION_STATEMENT=1000
+ENV PGDATA=/var/lib/postgresql/18/docker
 
 RUN apk add --no-cache curl nginx
 
@@ -38,11 +46,11 @@ WORKDIR ${HOMEDIR}
 # Postgres will automatically run these scripts on startup if the database is empty
 COPY sql/*.sql /docker-entrypoint-initdb.d/
 
-# Install PostgREST
-ADD https://github.com/PostgREST/postgrest/releases/download/v${POSTGREST_VERSION}/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz .
-RUN tar -xf postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz \
-    && mv postgrest /usr/local/bin/ \
-    && rm postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz \
+# Install PostgREST with checksum verification
+ADD https://github.com/PostgREST/postgrest/releases/download/v${POSTGREST_VERSION}/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz /tmp/
+RUN echo "ab5cc7e974d4940447991804588cfb8b3f7b2c57b691f0905df04d51ede69470  /tmp/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz" | sha256sum -c - \
+    && tar -xf /tmp/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz -C /usr/local/bin/ \
+    && rm /tmp/postgrest-v${POSTGREST_VERSION}-linux-static-x86-64.tar.xz \
     && chmod +x /usr/local/bin/postgrest
 
 # Generate the PostgREST configuration file
@@ -73,13 +81,33 @@ COPY --from=builder /src/api-server /usr/local/bin/
 
 # Data directory for downloaded notes
 VOLUME ["$HOMEDIR/data"]
+VOLUME ["/var/lib/postgresql"]
 
+# Health check - verifies Nginx and PostgreSQL are responding
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD wget -q --spider http://127.0.0.1:80/health && pg_isready -h 127.0.0.1 -U postgres || exit 1
 
 # Create a script to serve as entrypoint to start all services
 # The script starts Postgres, PostgREST, Nginx, and the API server
 COPY <<EOF run.sh
-/usr/local/bin/docker-entrypoint.sh postgres -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM} -c work_mem=${POSTGRES_WORK_MEM} -c statement_timeout=120000 -c log_min_duration_statement=1000 &
-until pg_isready -q; do sleep 1; done
+/usr/local/bin/docker-entrypoint.sh postgres \
+  -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM} \
+  -c work_mem=${POSTGRES_WORK_MEM} \
+  -c shared_buffers=${POSTGRES_SHARED_BUFFERS} \
+  -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE} \
+  -c max_parallel_workers_per_gather=${POSTGRES_MAX_PARALLEL_WORKERS} \
+  -c random_page_cost=${POSTGRES_RANDOM_PAGE_COST} \
+  -c statement_timeout=${POSTGRES_STATEMENT_TIMEOUT} \
+  -c log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_STATEMENT} &
+timeout=60
+until pg_isready -q || [ $timeout -le 0 ]; do
+  sleep 1
+  timeout=$((timeout - 1))
+done
+if [ $timeout -le 0 ]; then
+  echo "ERROR: PostgreSQL failed to start within 60 seconds"
+  exit 1
+fi
 /usr/local/bin/postgrest ${HOMEDIR}/postgrest.conf &
 /usr/local/bin/api-server &
 nginx -c ${HOMEDIR}/nginx.conf -g "daemon off;"

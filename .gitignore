@@ -15,3 +15,6 @@ cmd/api/x-notes-api
 
 # Node.js
 node_modules/
+
+# Sisyphus workflow files
+.sisyphus/

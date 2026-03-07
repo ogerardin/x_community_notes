@@ -2,12 +2,10 @@
 
 # This script builds and pushes a multi-architecture Docker image using Docker Buildx.
 # It ensures the required buildx builder exists, installs buildx if necessary, and targets several platforms.
-# The image is built from Dockerfile-alpine and pushed to the specified repository.
 #
 # Versioning:
-# - If the current commit is tagged with a semantic version (e.g., v1.0.0), both the version-specific
-#   and "latest" tags are pushed
-# - If no release tag exists, only the "latest" tag is pushed
+# - If on an exact git tag (e.g., v1.0.0): use 1.0.0, push as :1.0.0 and :latest
+# - If not on a tag: use "dev", warn user, push as :latest only
 
 set -euo pipefail
 
@@ -18,18 +16,22 @@ REPOSITORY_BUILDER="ogerardin/x-notes-builder"
 DOCKERFILE="Dockerfile-dist"
 BUILDER_NAME="builder-multi"
 
-# Extract version from git tag
+# Extract version from git tag - check for exact match
 VERSION=$(git describe --tags --exact-match 2>/dev/null || echo "")
 if [ -z "$VERSION" ]; then
-  # No exact tag match, only push 'latest'
-  echo "No git release tag found, will only push 'latest' tag"
+  echo "WARNING: No exact git tag found on current commit."
+  echo "         Building with version 'dev' - image will NOT be tagged with a version."
+  echo "         Only 'latest' tag will be pushed."
+  echo ""
+  echo "         To create a proper release:"
+  echo "           1. Run: make release"
+  echo "           2. Or manually: git tag v1.0.0 && git push origin v1.0.0"
+  echo ""
   VERSION="dev"
-  PUSH_LATEST_ONLY=true
 else
-  # Remove 'v' prefix if present (e.g., v1.0.0 -> 1.0.0)
+  # Remove 'v' prefix (e.g., v1.0.0 -> 1.0.0)
   VERSION="${VERSION#v}"
   echo "Using git tag version: $VERSION"
-  PUSH_LATEST_ONLY=false
 fi
 
 # Extract git SHA and build time
@@ -58,7 +60,7 @@ if ! docker buildx version &>/dev/null; then
   docker buildx install
 fi
 
-# Build and push builder image first (required for multi-arch build)
+# Build and push builder image
 echo "Building and pushing builder image..."
 docker buildx build --platform "$PLATFORMS" \
   --build-arg VERSION="${VERSION}" \
@@ -67,26 +69,16 @@ docker buildx build --platform "$PLATFORMS" \
   -t "$REPOSITORY_BUILDER:latest" \
   -f cmd/api/Dockerfile-builder . --push
 
-if [ "$PUSH_LATEST_ONLY" = false ]; then
-  docker buildx build --platform "$PLATFORMS" \
-    --build-arg VERSION="${VERSION}" \
-    --build-arg GIT_SHA="${GIT_SHA}" \
-    --build-arg BUILD_TIME="${BUILD_TIME}" \
-    -t "$REPOSITORY_BUILDER:${VERSION}" \
-    -f cmd/api/Dockerfile-builder . --push
+# Build and push main image - always push :latest, also :VERSION if not dev
+TAGS="--tag $REPOSITORY:latest"
+if [ "$VERSION" != "dev" ]; then
+  TAGS="$TAGS --tag $REPOSITORY:${VERSION}"
+  echo "Building and pushing multi-arch image: $REPOSITORY:$VERSION and $REPOSITORY:latest"
+else
+  echo "Building and pushing multi-arch image: $REPOSITORY:latest (dev build)"
 fi
 
-if [ "$PUSH_LATEST_ONLY" = true ]; then
-  echo "Building and pushing multi-arch image: $REPOSITORY:latest"
-  docker buildx build --platform "$PLATFORMS" \
-    $BUILD_ARGS $LABELS \
-    --tag "$REPOSITORY:latest" \
-    --file "$DOCKERFILE" . --push
-else
-  echo "Building and pushing multi-arch image: $REPOSITORY:$VERSION and $REPOSITORY:latest"
-  docker buildx build --platform "$PLATFORMS" \
-    $BUILD_ARGS $LABELS \
-    --tag "$REPOSITORY:$VERSION" \
-    --tag "$REPOSITORY:latest" \
-    --file "$DOCKERFILE" . --push
-fi
+docker buildx build --platform "$PLATFORMS" \
+  $BUILD_ARGS $LABELS \
+  $TAGS \
+  --file "$DOCKERFILE" . --push

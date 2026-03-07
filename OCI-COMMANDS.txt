@@ -1,5 +1,5 @@
 START CONTAINER
- sudo docker run --detach --name x-notes --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data ogerardin/x-notes:latest
+ sudo docker run --detach --name x-notes --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql ogerardin/x-notes:latest
 
 GRAB LATEST NOTES
  sudo docker exec -it x-notes /home/grab_notes.sh

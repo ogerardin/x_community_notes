@@ -64,17 +64,8 @@ else
   sudo docker rm "$CONTAINER_NAME" 2>/dev/null || true
   sudo docker run --detach --name "$CONTAINER_NAME" \
     --publish 8080:80 \
-    --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data \
+    --mount type=volume,source=x-notes-db,target=/var/lib/postgresql \
     "$IMAGE_NAME:$TAG"
-  echo "Container status:"
-  sudo docker ps --filter name="$CONTAINER_NAME"
-fi
-  sudo docker stop "$CONTAINER_NAME" 2>/dev/null || true
-  sudo docker rm "$CONTAINER_NAME" 2>/dev/null || true
-  sudo docker run --detach --name "$CONTAINER_NAME" \
-    --publish 8080:80 \
-    --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data \
-    "$IMAGE_NAME:\$TAG"
   echo "Container status:"
   sudo docker ps --filter name="$CONTAINER_NAME"
 fi

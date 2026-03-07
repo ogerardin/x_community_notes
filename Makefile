@@ -1,4 +1,4 @@
-.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status release oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs
+.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status release oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs stop
 
 # Variables
 CONTAINER_NAME := x-notes
@@ -6,11 +6,11 @@ DOCKER_BUILDER := x-notes-builder
 DOCKER_DIST := x-notes-dist
 DOCKER_API := x-notes-api
 PORTS := -p 8080:80 -p 5432:5432
-VOLUMES := -v $(shell pwd)/data:/home/data -v x-notes-db:/var/lib/postgresql/data
+VOLUMES := -v $(shell pwd)/data:/home/data -v x-notes-db:/var/lib/postgresql
 REPOSITORY := ogerardin/x-notes
 
 # Detect running mode: compose or single
-MODE := $(shell if docker ps --format '{{.Names}}' | grep -q '^x-notes$$'; then echo "single"; else echo "compose"; fi)
+MODE ?= $(shell if docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^x-notes$$'; then echo "single"; else echo "compose"; fi)
 
 # Version variables
 VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
@@ -34,6 +34,7 @@ help:
 	@echo "  build-dist     - Build single-container image"
 	@echo "  compose-up     - Start compose services"
 	@echo "  compose-down   - Stop compose services"
+	@echo "  stop           - Stop single container or compose"
 	@echo "  compose-logs   - Follow compose logs"
 	@echo "  run            - Build and run single container"
 	@echo "  push           - Build and push to Docker Hub"
@@ -70,6 +71,9 @@ compose-up: build-builder
 compose-down:
 	@docker compose down
 
+stop:
+	@$(if $(filter single,$(MODE)),docker stop $(CONTAINER_NAME),docker compose down)
+
 compose-logs:
 	@$(if $(filter single,$(MODE)),docker logs -f $(CONTAINER_NAME),docker compose logs -f)
 
@@ -104,8 +108,11 @@ release:
 	@./release.sh
 
 oci-update:
-	@TAG="$(VERSION)"; \
-	if [ -n "$(OCI_TAG)" ]; then TAG="$(OCI_TAG)"; fi; \
+	@if [ -n "$(OCI_TAG)" ]; then \
+		TAG="$(OCI_TAG)"; \
+	else \
+		TAG="latest"; \
+	fi; \
 	echo "Updating OCI instance to $(REPOSITORY):$$TAG"; \
 	./update_image_oci.sh "$$TAG"
 
@@ -114,7 +121,7 @@ oci-status:
 
 oci-start:
 	@IP=$$(oci compute instance list-vnics --instance-id "$$(cat .instance_ocid)" --query 'data[0]."public-ip"' --raw-output) && \
-	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql/data --mount type=volume,source=x-notes-data,target=/home/data $(REPOSITORY):latest"
+	ssh -o StrictHostKeyChecking=no ubuntu@$$IP "sudo docker pull $(REPOSITORY):latest && sudo docker rm -f $(CONTAINER_NAME) 2>/dev/null || true; sudo docker run -d --name $(CONTAINER_NAME) --publish 8080:80 --mount type=volume,source=x-notes-db,target=/var/lib/postgresql --mount type=volume,source=x-notes-data,target=/home/data -e ADMIN_CONTROLS_DISABLED=true $(REPOSITORY):latest"
 
 oci-stop:
 	$(call oci_exec,stop $(CONTAINER_NAME))
@@ -125,7 +132,12 @@ oci-logs:
 	$(call oci_exec,logs -f $(CONTAINER_NAME))
 
 oci-pull:
-	$(call oci_exec,pull $(REPOSITORY):latest)
+	@if [ -n "$(OCI_TAG)" ]; then \
+		TAG="$(OCI_TAG)"; \
+	else \
+		TAG="latest"; \
+	fi; \
+	$(call oci_exec,pull $(REPOSITORY):$$TAG)
 
 oci-prune:
 	$(call oci_exec,container prune -f)
