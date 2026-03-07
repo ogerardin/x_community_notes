@@ -26,6 +26,7 @@
                 importPollInterval: null,
                 schedulerStatus: null,
                 versionInfo: null,
+                adminControlsDisabled: false,
                 get latestCompletedImport() {
                     return this.importHistory.find(h => h.status === 'completed');
                 },
@@ -37,6 +38,15 @@
                     try {
                         let resp = await fetch('/version');
                         if (resp.ok) this.versionInfo = await resp.json();
+                    } catch (e) {}
+                },
+                async fetchConfig() {
+                    try {
+                        let resp = await fetch('/config');
+                        if (resp.ok) {
+                            let data = await resp.json();
+                            this.adminControlsDisabled = data.admin_controls_disabled;
+                        }
                     } catch (e) {}
                 },
                 async refreshNoteStats() {
@@ -162,6 +172,7 @@
                     }
                 },
                 init() {
+                    this.fetchConfig();
                     this.fetchImportStatus();
                     this.fetchSchedulerStatus();
                     this.fetchVersionInfo();
@@ -251,7 +262,7 @@
                 <svg class="spinner" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4"/></svg>
                 <span x-text="importStatus?.status"></span> (<span x-text="importStatus?.status === 'downloading' ? (importStatus?.download_percentage ?? 0) + '%' : importStatus?.status === 'indexing' ? (importStatus?.index_blocks_total ? Math.round((importStatus?.index_blocks_done ?? 0) / importStatus.index_blocks_total * 100) + '%' : '...') : ((importStatus?.rows_processed ?? 0).toLocaleString() + ' / ' + (importStatus?.total_rows ?? '?'))"></span>)
             </span>
-            <span class="header-stats" x-show="!['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak>(<span x-text="(latestCompletedImport?.total_rows ?? 0).toLocaleString()"></span> notes<template x-if="latestCompletedImport?.completed_at"> <span x-text="'• ' + formatDateTime(latestCompletedImport.completed_at)"></span></template>)</span>
+            <span class="header-stats" x-show="!['importing','downloading','indexing'].includes(importStatus?.status)" x-cloak>(<span x-text="(latestCompletedImport?.total_rows ?? 0).toLocaleString()"></span> notes)</span>
         </div>
         <nav class="header-nav">
             <div class="tabs">
@@ -359,10 +370,6 @@
         <div class="offline-banner" x-show="!backendOnline">Backend unavailable - Connection lost</div>
 
         <div class="stats-grid">
-            <div class="stat-card">
-                <span class="stat-label">Update Status</span>
-                <span class="badge" :class="statusBadgeClass(importStatus?.status)" x-text="importStatus?.status || 'idle'"></span>
-            </div>
             <div class="stat-card" x-show="schedulerStatus">
                 <span class="stat-label">Last Import Data Date</span>
                 <span x-text="schedulerStatus?.last_data_date || '-'"></span>
@@ -384,11 +391,12 @@
                 <div style="display: flex; flex-direction: column; gap: 0.125rem;">
                     <span x-text="versionInfo?.version || '-'"></span>
                     <span style="color: var(--text-secondary); font-size: 0.75rem;" x-text="versionInfo?.gitSHA?.slice(0,7) + ' • ' + versionInfo?.goos + '/' + versionInfo?.goarch"></span>
+                    <span x-show="versionInfo?.buildTime && versionInfo.buildTime !== 'unknown'" style="color: var(--text-secondary); font-size: 0.75rem;" x-text="versionInfo.buildTime"></span>
                 </div>
             </div>
         </div>
 
-        <div class="import-controls">
+        <div class="import-controls" x-show="!adminControlsDisabled">
             <button class="btn btn-primary" @click="triggerImport()" x-bind:disabled="['importing','downloading','indexing'].includes(importStatus?.status)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -485,7 +493,7 @@
                                     <span x-show="!h.indexing_started_at && h.status !== 'indexing'" style="color: var(--text-muted);">-</span>
                                 </td>
                                 <td>
-                                    <span class="badge" :class="statusBadgeClass(h.status)" x-text="h.status"></span>
+                                    <span class="badge" :class="statusBadgeClass(h.status)" x-text="h.status === 'skipped' ? 'no new data' : h.status"></span>
                                     <span x-show="h.error_message" style="color: var(--error); display: block; margin-top: 0.25rem;" x-text="h.error_message"></span>
                                 </td>
                             </tr>

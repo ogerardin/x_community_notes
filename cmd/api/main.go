@@ -13,10 +13,11 @@ import (
 )
 
 var (
-	logger             *slog.Logger
-	port               = "8888"
-	autoImportEnabled  = getEnvBool("AUTO_IMPORT_ENABLED", true)
-	autoImportInterval = getEnvDuration("AUTO_IMPORT_INTERVAL", time.Hour)
+	logger                *slog.Logger
+	port                  = "8888"
+	autoImportEnabled     = getEnvBool("AUTO_IMPORT_ENABLED", true)
+	autoImportInterval    = getEnvDuration("AUTO_IMPORT_INTERVAL", time.Hour)
+	adminControlsDisabled = getEnvBool("ADMIN_CONTROLS_DISABLED", false)
 )
 
 type schedulerState struct {
@@ -154,6 +155,13 @@ func getVersion(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(GetVersionInfo())
 }
 
+func getConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"admin_controls_disabled": adminControlsDisabled,
+	})
+}
+
 func main() {
 	logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -169,6 +177,7 @@ func main() {
 
 	http.HandleFunc("/health", healthCheck)
 	http.HandleFunc("/version", getVersion)
+	http.HandleFunc("/config", getConfig)
 	http.HandleFunc("GET /admin/imports/current", getImportCurrent)
 	http.HandleFunc("GET /admin/imports/{job_id}", getImportByID)
 	http.HandleFunc("POST /admin/imports", createImport)

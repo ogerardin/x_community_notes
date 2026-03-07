@@ -47,5 +47,9 @@ http {
         location /version {
             proxy_pass http://__API__:8888/version;
         }
+
+        location /config {
+            proxy_pass http://__API__:8888/config;
+        }
     }
 }

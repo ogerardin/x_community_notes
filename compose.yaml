@@ -8,9 +8,8 @@ services:
     shm_size: 128mb
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
-      PGDATA: /var/lib/postgresql/data/18/docker
     volumes:
-      - x-notes-db:/var/lib/postgresql/data
+      - x-notes-db:/var/lib/postgresql
       - ./config/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
       - ./sql:/docker-entrypoint-initdb.d:ro
       - ./data:/home/data
@@ -70,11 +69,16 @@ services:
     build:
       context: ./cmd/api
       dockerfile: Dockerfile
+      args:
+        - VERSION=${VERSION:-0.0.0}
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_TIME=${BUILD_TIME:-unknown}
     container_name: x-notes-api
     environment:
       - DB_HOST=db
       - AUTO_IMPORT_ENABLED=true
       - AUTO_IMPORT_INTERVAL=1h
+      - ADMIN_CONTROLS_DISABLED=false
     depends_on:
       - db
     volumes:

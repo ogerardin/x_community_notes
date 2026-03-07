@@ -537,24 +537,25 @@ tr:hover td {
 /* Loading */
 .loading-overlay {
     position: fixed;
-    bottom: 1.5rem;
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
-    background: var(--bg-card);
+    transform: translate(-50%, -50%);
+    background: rgba(10, 10, 10, 0.85);
+    backdrop-filter: blur(4px);
     border: 1px solid var(--border-color);
-    padding: 0.75rem 1.25rem;
+    padding: 1.5rem 2rem;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     z-index: 1000;
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 1rem;
 }
 
 .spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--border-color);
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border-color);
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
