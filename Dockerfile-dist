@@ -89,7 +89,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 
 # Create a script to serve as entrypoint to start all services
 # The script starts Postgres, PostgREST, Nginx, and the API server
-COPY <<EOF run.sh
+COPY <<"EOF" run.sh
 /usr/local/bin/docker-entrypoint.sh postgres \
   -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM} \
   -c work_mem=${POSTGRES_WORK_MEM} \
