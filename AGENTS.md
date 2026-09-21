@@ -81,8 +81,7 @@ curl http://localhost:8080/api/imports
 |------|---------|
 | `compose.yaml` | Docker Compose config |
 | `Dockerfile-dist` | Single container Dockerfile |
-| `cmd/api/Dockerfile` | API image for compose (uses builder) |
-| `cmd/api/Dockerfile-builder` | Shared Go build stage |
+| `cmd/api/Dockerfile` | API image for compose (self-contained, builds Go from source) |
 | `Makefile` | Build orchestration |
 | `build_multi.sh` | Multi-arch build & push to Hub |
 | `nginx.conf.template` | Nginx config with placeholders |

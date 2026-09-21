@@ -1,8 +1,7 @@
-.PHONY: help build-builder build-api build-dist compose-up compose-down compose-logs run push clean status release oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs stop
+.PHONY: help build-api build-dist compose-up compose-down compose-logs run push clean status release oci-update oci-status oci-start oci-stop oci-restart oci-logs oci-pull oci-prune list-releases up down logs stop
 
 # Variables
 CONTAINER_NAME := x-notes
-DOCKER_BUILDER := x-notes-builder
 DOCKER_DIST := x-notes-dist
 DOCKER_API := x-notes-api
 PORTS := -p 8080:80 -p 5432:5432
@@ -29,7 +28,6 @@ LABELS := --label org.opencontainers.image.version=$(VERSION) --label org.openco
 
 help:
 	@echo "Available targets:"
-	@echo "  build-builder   - Build shared Go builder image"
 	@echo "  build-api      - Build API image for compose"
 	@echo "  build-dist     - Build single-container image"
 	@echo "  compose-up     - Start compose services"
@@ -54,19 +52,16 @@ help:
 	@echo "Git SHA: $(GIT_SHA)"
 	@echo "Build time: $(BUILD_TIME)"
 
-build-builder:
-	@docker build -t $(DOCKER_BUILDER) -f cmd/api/Dockerfile-builder $(BUILD_ARGS) .
+build-api:
+	@docker buildx build --load -t $(DOCKER_API) $(BUILD_ARGS) ./cmd/api
 
-build-api: build-builder
-	@docker build -t $(DOCKER_API) -f cmd/api/Dockerfile $(BUILD_ARGS) .
-
-build-dist: build-builder
+build-dist:
 	@docker buildx build -t $(DOCKER_DIST) -f Dockerfile-dist $(BUILD_ARGS) $(LABELS) --load .
 
-compose-up: build-builder
+compose-up:
 	@docker volume create x-notes-db 2>/dev/null || true
 	@docker stop $(CONTAINER_NAME) 2>/dev/null && docker rm $(CONTAINER_NAME) || true
-	@BUILDX_BUILDER=default docker compose up -d --build
+	@docker compose up -d --build
 
 compose-down:
 	@docker compose down
@@ -87,7 +82,7 @@ run: build-dist
 	@docker rm -f $(CONTAINER_NAME) 2>/dev/null || true
 	@docker run -d $(PORTS) $(VOLUMES) --name $(CONTAINER_NAME) $(DOCKER_DIST)
 
-push: build-builder
+push:
 	@./build_multi.sh
 
 clean:

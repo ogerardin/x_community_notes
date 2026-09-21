@@ -12,7 +12,6 @@ set -euo pipefail
 # Configurable variables
 PLATFORMS="linux/amd64,linux/arm64,linux/arm/v7"
 REPOSITORY="ogerardin/x-notes"
-REPOSITORY_BUILDER="ogerardin/x-notes-builder"
 DOCKERFILE="Dockerfile-dist"
 BUILDER_NAME="builder-multi"
 
@@ -59,15 +58,6 @@ if ! docker buildx version &>/dev/null; then
   echo "Installing docker buildx..."
   docker buildx install
 fi
-
-# Build and push builder image
-echo "Building and pushing builder image..."
-docker buildx build --platform "$PLATFORMS" \
-  --build-arg VERSION="${VERSION}" \
-  --build-arg GIT_SHA="${GIT_SHA}" \
-  --build-arg BUILD_TIME="${BUILD_TIME}" \
-  -t "$REPOSITORY_BUILDER:latest" \
-  -f cmd/api/Dockerfile-builder . --push
 
 # Build and push main image - always push :latest, also :VERSION if not dev
 TAGS="--tag $REPOSITORY:latest"
