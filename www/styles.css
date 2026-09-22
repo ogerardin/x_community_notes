@@ -699,3 +699,32 @@ tr:hover td {
         justify-content: flex-end;
     }
 }
+
+/* Favorite author star */
+.fav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.fav-btn:hover {
+    color: var(--warning);
+    background: var(--bg-card-hover);
+}
+
+.fav-btn.active {
+    color: var(--warning);
+}
+
+.fav-btn.active svg {
+    fill: var(--warning);
+}

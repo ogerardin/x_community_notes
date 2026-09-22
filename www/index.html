@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>X/Twitter Community Notes</title>
-    <link rel="stylesheet" href="/styles.css?v=15">
+    <link rel="stylesheet" href="/styles.css?v=16">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <script>
         document.addEventListener('alpine:init', () => {
@@ -190,34 +190,86 @@
                 error: '',
                 offset: 0,
                 hasMore: true,
+                favorites: [],
+                searchFavorites: [],
+                abortController: null,
+                queryUrl(limit, offset, authorFilter) {
+                    let url = '/data/note?limit=' + limit + '&offset=' + offset +
+                        '&summary_ts=wfts.' + encodeURIComponent(this.search) +
+                        '&select=createdatmillis,noteid,tweetid,noteauthorparticipantid,summary&order=createdatmillis.desc';
+                    if (authorFilter) url += '&noteauthorparticipantid=' + authorFilter;
+                    return url;
+                },
+                async fetchJson(url, signal) {
+                    const response = await fetch(url, { signal });
+                    if (!response.ok) throw new Error('Fetch failed with status ' + response.status);
+                    return response.json();
+                },
+                isFavorite(authorId) {
+                    return this.favorites.includes(authorId);
+                },
+                toggleFavorite(authorId) {
+                    if (!authorId) return;
+                    const i = this.favorites.indexOf(authorId);
+                    if (i >= 0) this.favorites.splice(i, 1); else this.favorites.push(authorId);
+                    localStorage.setItem('favoriteAuthors', JSON.stringify(this.favorites));
+                },
                 async fetchItems(append = false) {
                     if (!append) {
+                        if (this.abortController) this.abortController.abort();
+                        this.abortController = new AbortController();
                         this.items = [];
                         this.offset = 0;
                         this.hasMore = true;
+                        this.error = '';
+                        this.searchFavorites = this.favorites.map(encodeURIComponent);
+                    } else {
+                        if (!this.hasMore || this.loading) return;
+                        if (!this.abortController) this.abortController = new AbortController();
                     }
-                    if (!this.hasMore || this.loading) return;
-
+                    const ctrl = this.abortController;
                     this.loading = true;
-                    this.error = '';
                     try {
-                        const response = await fetch('/data/note?limit=50&offset=' + this.offset + '&summary_ts=wfts.' + encodeURIComponent(this.search) + '&select=createdatmillis,noteid,tweetid,noteauthorparticipantid,summary&order=createdatmillis.desc');
-                        if (!response.ok) throw new Error('Fetch failed with status ' + response.status);
-
-                        const data = await response.json();
-
-                        if (append) {
-                            this.items = [...this.items, ...data];
+                        let newItems;
+                        if (this.searchFavorites.length > 0) {
+                            const favFilter = 'in.(' + this.searchFavorites.join(',') + ')';
+                            const restFilter = 'not.in.(' + this.searchFavorites.join(',') + ')';
+                            if (!append) {
+                                const [favRes, restRes] = await Promise.allSettled([
+                                    this.fetchJson(this.queryUrl(100, 0, favFilter), ctrl.signal),
+                                    this.fetchJson(this.queryUrl(50, this.offset, restFilter), ctrl.signal)
+                                ]);
+                                if (ctrl !== this.abortController) return;
+                                if (favRes.status === 'rejected' && restRes.status === 'rejected') throw favRes.reason;
+                                if (favRes.status === 'rejected' || restRes.status === 'rejected') {
+                                    const reason = favRes.status === 'rejected' ? favRes.reason : restRes.reason;
+                                    this.error = 'Partial results, one query failed: ' + reason.message;
+                                }
+                                const favData = favRes.status === 'fulfilled' ? favRes.value : [];
+                                const restData = restRes.status === 'fulfilled' ? restRes.value : [];
+                                newItems = [...favData, ...restData];
+                                this.offset += restData.length;
+                                this.hasMore = restData.length === 50;
+                            } else {
+                                const restData = await this.fetchJson(this.queryUrl(50, this.offset, restFilter), ctrl.signal);
+                                if (ctrl !== this.abortController) return;
+                                newItems = restData;
+                                this.offset += restData.length;
+                                this.hasMore = restData.length === 50;
+                            }
                         } else {
-                            this.items = data;
+                            const data = await this.fetchJson(this.queryUrl(50, this.offset, null), ctrl.signal);
+                            if (ctrl !== this.abortController) return;
+                            newItems = data;
+                            this.offset += data.length;
+                            this.hasMore = data.length === 50;
                         }
-
-                        this.hasMore = data.length === 50;
-                        this.offset += data.length;
+                        this.items = append ? [...this.items, ...newItems] : newItems;
                     } catch (e) {
+                        if (e.name === 'AbortError' || ctrl !== this.abortController) return;
                         this.error = 'Failed to load notes: ' + e.message;
                     } finally {
-                        this.loading = false;
+                        if (ctrl === this.abortController) this.loading = false;
                     }
                 },
                 setupInfiniteScroll() {
@@ -235,6 +287,7 @@
                     });
                 },
                 init() {
+                    this.favorites = JSON.parse(localStorage.getItem('favoriteAuthors') || '[]');
                     this.setupInfiniteScroll();
                 },
                 formatSummary(summary) {
@@ -337,6 +390,11 @@
                         <div class="note-meta">
                             <span class="note-date" x-text="formatDateTime(item.createdatmillis)"></span>
                             <span class="author-badge" :style="'background: ' + hashColor(item.noteauthorparticipantid)" x-text="item.noteauthorparticipantid?.slice(-4) || ''"></span>
+                            <button class="fav-btn" :class="{ 'active': isFavorite(item.noteauthorparticipantid) }" x-show="item.noteauthorparticipantid" @click="toggleFavorite(item.noteauthorparticipantid)" :title="isFavorite(item.noteauthorparticipantid) ? 'Remove from favorite authors' : 'Add to favorite authors'">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                </svg>
+                            </button>
                         </div>
                         <div class="note-actions">
                             <button class="action-btn" @click="window.open('https://x.com/i/communitynotes/t/' + item.tweetid, '_blank', 'noopener')" title="View notes on tweet">
